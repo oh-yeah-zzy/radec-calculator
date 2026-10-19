@@ -9,7 +9,7 @@
  *   · 周年光行差：含地球轨道偏心率项
  *   · 参考系：ICRS/FK5 J2000 ↔ FK4 B1950（含 E 项，算法同 SLALIB FK45Z/FK54Z）
  *   · 坐标系：赤道 ↔ 银道（IAU 1958 银道系）↔ 黄道（任意历元平黄道）
- *   · 地平坐标：时角、高度角、方位角、大气折射、大气质量、星位角
+ *   · 地平坐标：时角、高度角、方位角、大气折射、大气质量、星位角；以及由方位角/高度角反算赤经赤纬
  *   · 升起/中天/落下时刻、太阳位置（低精度）、角距离与位置角、所在星座（Roman 1987）
  *
  * 约定：
@@ -582,6 +582,24 @@
     return { alt: Math.atan2(z, r), az: r === 0 ? 0 : wrapTau(Math.atan2(y, x)) };
   }
 
+  /**
+   * 方位角/高度角 → 时角/赤纬（弧度）：horizontal() 的逆运算（同 SOFA iauAe2hd）
+   * @param {number} az 方位角（弧度，北 0、东 π/2）
+   * @param {number} alt 高度角（弧度）
+   * @param {number} lat 地理纬度（弧度）
+   * @returns {{ha:number, dec:number}} 时角 (−π, π]（向西为正）与赤纬
+   */
+  function equatorialFromHorizontal(az, alt, lat) {
+    var sa = Math.sin(az), ca = Math.cos(az);
+    var se = Math.sin(alt), ce = Math.cos(alt);
+    var sl = Math.sin(lat), cl = Math.cos(lat);
+    var x = -ca * ce * sl + se * cl; // 指向子午圈与天赤道的交点（时角 0）
+    var y = -sa * ce; // 指向时角 +6h（正西）
+    var z = ca * ce * cl + se * sl; // 指向北天极
+    var r = Math.sqrt(x * x + y * y);
+    return { ha: r === 0 ? 0 : Math.atan2(y, x), dec: Math.atan2(z, r) };
+  }
+
   /** 星位角 q（弧度）：天体处"指向天顶方向"与"指向北天极方向"的夹角（同 SOFA iauHd2pa） */
   function parallacticAngle(ha, dec, lat) {
     var cl = Math.cos(lat);
@@ -600,6 +618,23 @@
     var t = tempC == null ? 10 : tempC;
     var R = 1.02 / Math.tan((altTrueDeg + 10.3 / (altTrueDeg + 5.11)) * D2R); // 角分
     return Math.max(0, R * (p / 1010) * (283 / (273 + t))) / 60;
+  }
+
+  /**
+   * 观测高度角（含大气折射）→ 真高度角（度）：refraction() 的逆运算。
+   * 真高度角 h ≥ −1° 时 h + R(h) 随 h 单调递增，用二分法求解（折射量不超过 1°，区间取 [观测值 − 1°, 观测值]）；
+   * 观测值低于 −1° 时与 refraction() 一致，按无折射处理。
+   * 注：refraction() 在 −1° 处截断，观测值落在约 −1° ~ −0.35° 之间（天体已在地平线下）时没有精确解，结果收敛到 −1°。
+   */
+  function unrefract(altObsDeg, pressureHpa, tempC) {
+    if (altObsDeg < -1) return altObsDeg;
+    var lo = altObsDeg - 1, hi = altObsDeg;
+    for (var i = 0; i < 40; i++) {
+      var mid = (lo + hi) / 2;
+      if (mid + refraction(mid, pressureHpa, tempC) > altObsDeg) hi = mid;
+      else lo = mid;
+    }
+    return (lo + hi) / 2;
   }
 
   /** 大气质量（Kasten & Young 1989），高度角 ≤ 0 时返回 null */
@@ -652,6 +687,28 @@
       airmass: airmass(altApp),
       parallactic: parallacticAngle(ha, app.dec * D2R, lat) * R2D
     };
+  }
+
+  /**
+   * 地平坐标 → ICRS 单位向量：observe() 的逆运算。
+   * 步骤：开启折射时先把观测高度角还原为真高度角 → 由方位角、高度角求时角与视赤纬 →
+   *       视赤经 = 地方视恒星时 − 时角 → 由视位置（真赤道、真春分点，含光行差）还原到 ICRS。
+   * 同一方位角、高度角在不同时刻对应不同的赤经赤纬（约每秒 15″），因此必须给出观测时刻。
+   * @param {number} azDeg 方位角（度，北 0°、东 90°）
+   * @param {number} altDeg 高度角（度）；opts.refraction 不为 false 时视为含大气折射的观测值
+   * @param {Date} date 观测时刻
+   * @param {object} site { lat, lon（东经为正，度）, elev（米，可选） }
+   * @param {object} [opts] { refraction: true/false, temperature: ℃ }
+   */
+  function horizontalToICRS(azDeg, altDeg, date, site, opts) {
+    opts = opts || {};
+    var jdUtc = jdFromDate(date);
+    var jdTT = jdTTFromUtc(jdUtc);
+    var alt = opts.refraction === false ? altDeg : unrefract(altDeg, pressureFromElevation(site.elev), opts.temperature);
+    var hd = equatorialFromHorizontal(azDeg * D2R, alt * D2R, site.lat * D2R);
+    var last = gast(jdUtc, jdTT) + site.lon * D2R;
+    var vt = vecFromRaDec(wrapTau(last - hd.ha) * R2D, hd.dec * R2D);
+    return icrsFromApparent(vt, jdTT);
   }
 
   /**
@@ -791,8 +848,10 @@
     galacticToICRS: galacticToICRS, icrsToGalactic: icrsToGalactic, toICRS: toICRS,
     // 恒星时与地平坐标
     earthRotationAngle: earthRotationAngle, gmst: gmst, gast: gast,
-    horizontal: horizontal, parallacticAngle: parallacticAngle, refraction: refraction, airmass: airmass,
-    pressureFromElevation: pressureFromElevation, observe: observe, riseTransitSet: riseTransitSet,
+    horizontal: horizontal, equatorialFromHorizontal: equatorialFromHorizontal, parallacticAngle: parallacticAngle,
+    refraction: refraction, unrefract: unrefract, airmass: airmass,
+    pressureFromElevation: pressureFromElevation, observe: observe, horizontalToICRS: horizontalToICRS,
+    riseTransitSet: riseTransitSet,
     sunApparent: sunApparent, altitudeTrack: altitudeTrack,
     // 其他
     separation: separation, positionAngle: positionAngle, constellationOf: constellationOf

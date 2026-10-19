@@ -47,6 +47,19 @@
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
+  // 北银极方向（J2000）。银河只分布在银道面附近，逐像素绘制银河时先用它求出银纬，远离银道面的像素直接跳过
+  var NGP = vec(192.8594812065348, 27.12825118085622);
+  // ImageData 按 R、G、B、A 的字节顺序存放；用 Uint32Array 一次写入整个像素时要考虑字节序（主流设备都是小端）
+  var LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+  var ALPHA_SHIFT = LITTLE_ENDIAN ? 24 : 0;
+  /** 把 RGBA 打包成一个 32 位整数，对应 Uint32Array 视图下 ImageData 的一个像素 */
+  function packRGBA(r, g, b, a) {
+    return (LITTLE_ENDIAN ? (a << 24 | b << 16 | g << 8 | r) : (r << 24 | g << 16 | b << 8 | a)) >>> 0;
+  }
+  // 地面遮罩的颜色（不含透明度，逐像素按深度叠加透明度）：地平线以下的"地面"、地平线上方的大气辉光
+  var GROUND_RGB = packRGBA(10, 14, 16, 0);
+  var GLOW_RGB = packRGBA(70, 100, 150, 0);
+
   /**
    * B−V 色指数 → 恒星颜色（参考 Mitchell Charity "What color are the stars?" 的色表，分段线性插值）
    * 蓝白色的热星 B−V 为负，橙红色的冷星 B−V 大于 1.4
@@ -96,6 +109,8 @@
     this.arc = null; // 两个标记之间的大圆弧 {a, b, label}
     this.horizon = null; // 地平线 {zenith, north}（J2000 单位向量）
     this.anim = null; // 进行中的飞行动画
+    this.zoomTo = null; // 平滑缩放的目标视场（null 表示没有进行中的缩放）
+    this._lastFrame = 0; // 动画进行中上一帧的时间戳（空闲时为 0），用于按真实时间推进缩放动画
     this.interacting = false; // 正在拖动/缩放（此时用低分辨率银河以保证流畅）
     this._raf = 0;
     this._hiresTimer = 0;
@@ -188,14 +203,37 @@
     });
   };
 
-  /** 银河亮度图：base64 → Uint8Array（等距圆柱投影，1° 分辨率） */
+  /**
+   * 银河亮度图：base64 → Uint8Array（等距圆柱投影，1° 分辨率），并预先算好：
+   *   · 银河离银道面最远的银纬（更远的方向没有银河，逐像素绘制时直接跳过）；
+   *   · 亮度 → 颜色的查找表（免去每个像素一次幂运算）。
+   */
   P._prepareMilkyWay = function (data) {
     var mw = data.milkyWay;
     if (!mw) return;
     var bin = root.atob(mw.data);
     var arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    this.mw = { w: mw.w, h: mw.h, data: arr };
+    // 有亮度的格子中，离银道面最远的一个（用 |sin 银纬| 表示）
+    var maxSinB = 0;
+    for (var j = 0; j < mw.h; j++) {
+      for (var k = 0; k < mw.w; k++) {
+        if (arr[j * mw.w + k] < 2) continue;
+        var v = vec(k + 0.5, 89.5 - j); // 格子中心
+        var sb = Math.abs(v[0] * NGP[0] + v[1] * NGP[1] + v[2] * NGP[2]);
+        if (sb > maxSinB) maxSinB = sb;
+      }
+    }
+    // 再放宽 2°：格子本身宽 1°，双线性取样还会向外扩散约 1°
+    var bLimit = Math.min(90, Math.asin(maxSinB) * R2D + 2);
+    // 亮度（0~255）→ 颜色：暗处偏蓝、亮处偏暖白，模拟银河的颜色层次；亮度低于约 0.4% 时完全透明
+    var lut = new Uint32Array(256);
+    for (var n = 2; n < 256; n++) {
+      var b = n / 255;
+      lut[n] = packRGBA(Math.round(150 + 95 * b), Math.round(168 + 72 * b), Math.round(235 - 15 * b),
+        Math.round(Math.min(255, 255 * 0.62 * Math.pow(b, 0.85))));
+    }
+    this.mw = { w: mw.w, h: mw.h, data: arr, lut: lut, sinBLimit: Math.sin(bLimit * D2R) };
   };
 
   /* ---------------------------------------------------------------------
@@ -228,6 +266,7 @@
   /** 立即切换视图中心/视场 */
   P.setView = function (ra, dec, fov) {
     this.anim = null;
+    this.zoomTo = null;
     this.ra0 = ra;
     this.dec0 = clamp(dec, -90, 90);
     if (fov) this.fov = clamp(fov, 8, 200);
@@ -239,7 +278,9 @@
     o = o || {};
     var to = vec(ra, dec);
     var from = vec(this.ra0, this.dec0);
-    var fov1 = o.fov ? clamp(o.fov, 8, 200) : this.fov;
+    // 若正在平滑缩放，以缩放的目标视场为准，并交给飞行动画一起完成
+    var fov1 = o.fov ? clamp(o.fov, 8, 200) : (this.zoomTo != null ? this.zoomTo : this.fov);
+    this.zoomTo = null;
     if (this.reduceMotion || o.duration === 0) {
       this.setView(ra, dec, fov1);
       return;
@@ -254,8 +295,24 @@
     this.requestRender();
   };
 
-  P.zoomBy = function (factor) {
-    this.fov = clamp(this.fov * factor, 8, 200);
+  /**
+   * 缩放视场（factor < 1 放大，> 1 缩小）。
+   * 默认平滑过渡（滚轮、按钮：一次滚动不再"跳"一下）；immediate 为 true 时立即生效（双指缩放需要跟手）
+   */
+  P.zoomBy = function (factor, immediate) {
+    if (this.anim) {
+      // 飞行途中缩放：调整飞行终点的视场，由飞行动画平滑过渡过去
+      this.anim.fov1 = clamp(this.anim.fov1 * factor, 8, 200);
+      this.requestRender();
+      return;
+    }
+    var target = clamp((this.zoomTo != null ? this.zoomTo : this.fov) * factor, 8, 200);
+    if (immediate || this.reduceMotion) {
+      this.fov = target;
+      this.zoomTo = null;
+    } else {
+      this.zoomTo = target; // 在 _frame() 中逐帧逼近
+    }
     this._markInteracting();
     this.requestRender();
   };
@@ -370,6 +427,8 @@
    * --------------------------------------------------------------------- */
 
   P._frame = function (now) {
+    // 距上一帧的毫秒数（最多按 100ms 计）；动画开始后的第一帧（之前处于空闲）按 16ms 计，避免一下子跳太多
+    var dt = this._lastFrame ? clamp(now - this._lastFrame, 1, 100) : 16;
     // 推进飞行动画
     if (this.anim) {
       var a = this.anim;
@@ -384,8 +443,24 @@
         this._scheduleHires();
       }
     }
+    // 平滑缩放：视场按指数方式逼近目标（时间常数约 60ms），在对数空间插值，使放大和缩小的手感一致
+    if (this.zoomTo != null) {
+      var kz = 1 - Math.exp(-dt / 60);
+      this.fov = Math.exp(Math.log(this.fov) + (Math.log(this.zoomTo) - Math.log(this.fov)) * kz);
+      if (Math.abs(this.fov / this.zoomTo - 1) < 0.002) {
+        this.fov = this.zoomTo;
+        this.zoomTo = null;
+      }
+      this._markInteracting();
+    }
     this._render();
-    if (this.anim) this.requestRender();
+    // 动画还没结束就预约下一帧，并记下本帧时间；结束后清零，下次动画从"第一帧"开始计时
+    if (this.anim || this.zoomTo != null) {
+      this._lastFrame = now;
+      this.requestRender();
+    } else {
+      this._lastFrame = 0;
+    }
   };
 
   P._render = function () {
@@ -393,22 +468,30 @@
     this._updateBasis();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    // 1) 深空背景：以焦点为中心的径向渐变
-    var g = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, Math.max(W, H) * 0.9);
-    g.addColorStop(0, '#0b1533');
-    g.addColorStop(0.55, '#060b1d');
-    g.addColorStop(1, '#02040b');
-    ctx.fillStyle = g;
+    // 1) 深空背景：以焦点为中心的径向渐变（渐变对象只在中心或画布尺寸变化时重建）
+    var bgKey = this.cx + ',' + this.cy + ',' + W + ',' + H;
+    if (this._bgKey !== bgKey) {
+      var g = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, Math.max(W, H) * 0.9);
+      g.addColorStop(0, '#0b1533');
+      g.addColorStop(0.55, '#060b1d');
+      g.addColorStop(1, '#02040b');
+      this._bg = g;
+      this._bgKey = bgKey;
+    }
+    ctx.fillStyle = this._bg;
     ctx.fillRect(0, 0, W, H);
 
-    // 2) 银河与"地面"遮罩（低分辨率逐像素计算后放大，天然柔和）
+    // 2) 银河与"地面"遮罩：低分辨率逐像素计算后放大（天然柔和）。
+    //    纹理的像素总数有上限——交互时（拖动、缩放、飞行）约 4.5 万、静止时约 16 万，
+    //    屏幕再大每帧的计算量也基本不变；停下来后再补画一帧更精细的版本
     var lowres = this.anim || this.interacting;
-    this._renderSkyTexture(lowres ? 7 : 4);
-    if (this.layers.milkyway && this.mw) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(this.mwCanvas, 0, 0, W, H);
-    }
+    var area = W * H;
+    var step = lowres ? Math.max(5, Math.sqrt(area / 45000)) : Math.max(4, Math.sqrt(area / 160000));
+    this._renderSkyTexture(step);
+    // 交互时用双线性放大（开销小），静止时用高质量插值；只放大银河所在的那一块（视野里没有银河就不画）
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = lowres ? 'low' : 'high';
+    if (this.layers.milkyway && this.mw) this._drawTexture(this.mwCanvas, this.mwBox, step);
 
     // 3) 坐标网格、天赤道、黄道
     this.gridLabels = [];
@@ -420,11 +503,10 @@
     // 5) 恒星
     this._drawStars();
 
-    // 6) 地平线以下的地面遮罩（画在星星之后，让地平线下的星变暗）
+    // 6) 地平线以下的地面遮罩（画在星星之后，让地平线下的星变暗）；同样只放大有内容的那一块
     var showHorizon = this.layers.horizon && this.horizon;
     if (showHorizon) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(this.groundCanvas, 0, 0, W, H);
+      this._drawTexture(this.groundCanvas, this.groundBox, step);
       this._drawHorizon();
     }
 
@@ -440,9 +522,26 @@
   };
 
   /**
+   * 把低分辨率纹理中 box（[起始列, 起始行, 结束列, 结束行]）这一块放大画到屏幕上。
+   * 纹理第 i 列的中心对应屏幕 (i + 0.5)·step；向外多取 1 个纹理像素，让边缘平滑过渡到透明。
+   * 放大是软件绘制时最耗时的操作之一，只画有内容的部分能省下不少时间。
+   */
+  P._drawTexture = function (canvas, box, step) {
+    if (!box) return;
+    var sx = Math.max(0, box[0] - 1), sy = Math.max(0, box[1] - 1);
+    var sw = Math.min(this.texW, box[2] + 2) - sx, sh = Math.min(this.texH, box[3] + 2) - sy;
+    this.ctx.drawImage(canvas, sx, sy, sw, sh, sx * step, sy * step, sw * step, sh * step);
+  };
+
+  /**
    * 逐像素（低分辨率）计算银河亮度和地平线遮罩：
    * 对每个低分辨率像素做逆投影得到天球方向，再在 1° 分辨率的银河亮度图上双线性取样。
    * 这种"逆向重投影"不受投影方式影响，也不存在多边形跨 0h/24h 的接缝问题。
+   * 这是每帧最耗时的一步，为此做了几处优化：
+   *   · 先用 3 次乘法求出银纬，远离银道面（没有银河）的像素直接跳过，不做反三角函数和取样；
+   *   · 亮度 → 颜色用查找表，每个像素通过 Uint32Array 一次写入；
+   *   · 记下银河、地面遮罩中有内容的范围（mwBox、groundBox），绘制时只放大这一块。
+   * @param {number} step 一个纹理像素对应的屏幕像素数（可以是小数）
    */
   P._renderSkyTexture = function (step) {
     var W = this.W, H = this.H;
@@ -453,99 +552,135 @@
       this.mwCanvas.height = h;
       this.mwCtx = this.mwCanvas.getContext('2d');
       this.mwImg = this.mwCtx.createImageData(w, h);
+      this.mwBuf = new Uint32Array(this.mwImg.data.buffer); // 同一块内存的 32 位视图：一次写一个像素
       this.groundCanvas = document.createElement('canvas');
       this.groundCanvas.width = w;
       this.groundCanvas.height = h;
       this.groundCtx = this.groundCanvas.getContext('2d');
       this.groundImg = this.groundCtx.createImageData(w, h);
+      this.groundBuf = new Uint32Array(this.groundImg.data.buffer);
     }
-    var out = this.mwImg.data, gout = this.groundImg.data;
+    this.texW = w;
+    this.texH = h;
     var mw = this.mw;
     var doMw = !!(this.layers.milkyway && mw);
     var zen = this.layers.horizon && this.horizon ? this.horizon.zenith : null;
     if (!doMw && !zen) return; // 两个图层都关闭时无需逐像素计算
+    var out = this.mwBuf, gout = this.groundBuf;
     var ec = this.ec, ee = this.ee, en = this.en, scale = this.scale, cx = this.cx, cy = this.cy, zCut = this.zCut;
-    var MW = mw ? mw.w : 0, MH = mw ? mw.h : 0, md = mw ? mw.data : null;
+    var MW = mw ? mw.w : 0, MH = mw ? mw.h : 0, md = mw ? mw.data : null, lut = mw ? mw.lut : null;
+    var sinB = mw ? mw.sinBLimit : 0;
+    // 像素方向 v = X·ee + Y·en + Z·ec。预先算好三个基向量与北银极、天顶的点积，
+    // 每个像素的 sin(银纬)、sin(高度角) 就只需 3 次乘法
+    var ge = ee[0] * NGP[0] + ee[1] * NGP[1] + ee[2] * NGP[2];
+    var gn = en[0] * NGP[0] + en[1] * NGP[1] + en[2] * NGP[2];
+    var gc = ec[0] * NGP[0] + ec[1] * NGP[1] + ec[2] * NGP[2];
+    var ze = 0, zn = 0, zc = 0;
+    if (zen) {
+      ze = ee[0] * zen[0] + ee[1] * zen[1] + ee[2] * zen[2];
+      zn = en[0] * zen[0] + en[1] * zen[1] + en[2] * zen[2];
+      zc = ec[0] * zen[0] + ec[1] * zen[1] + ec[2] * zen[2];
+    }
+    // 银河、地面遮罩中有内容的范围：列 x0~x1、行 y0~y1
+    var mx0 = w, mx1 = -1, my0 = h, my1 = -1;
+    var gx0 = w, gx1 = -1, gy0 = h, gy1 = -1;
 
+    var k = 0; // 当前像素在纹理中的序号
     for (var j = 0; j < h; j++) {
       var Yp = (cy - (j + 0.5) * step) / scale;
-      for (var i = 0; i < w; i++) {
-        var o = (j * w + i) * 4;
+      var Y2 = Yp * Yp;
+      for (var i = 0; i < w; i++, k++) {
+        // 球极投影的逆变换：得到局部坐标 X（东）、Y（北）、Z（指向视图中心）
         var Xp = (cx - (i + 0.5) * step) / scale;
-        var r2 = Xp * Xp + Yp * Yp;
-        var Z = (4 - r2) / (4 + r2);
+        var r2 = Xp * Xp + Y2;
+        var q = 1 / (4 + r2);
+        var Z = (4 - r2) * q;
         if (Z < zCut) {
-          out[o + 3] = 0;
-          gout[o + 3] = 0;
+          out[k] = 0;
+          gout[k] = 0;
           continue;
         }
-        var f = (1 + Z) / 2;
-        var X = Xp * f, Y = Yp * f;
-        var vx = X * ee[0] + Y * en[0] + Z * ec[0];
-        var vy = X * ee[1] + Y * en[1] + Z * ec[1];
-        var vz = Y * en[2] + Z * ec[2];
+        var X = 4 * Xp * q, Y = 4 * Yp * q;
 
         if (doMw) {
-          var ra = Math.atan2(vy, vx) * R2D;
-          if (ra < 0) ra += 360;
-          var dec = Math.asin(vz > 1 ? 1 : vz < -1 ? -1 : vz) * R2D;
-          var u = ra - 0.5, vv = 89.5 - dec;
-          var i0 = Math.floor(u), j0 = Math.floor(vv);
-          var fu = u - i0, fv = vv - j0;
-          var ia = (i0 + MW) % MW, ib = (i0 + 1 + MW) % MW;
-          var ja = j0 < 0 ? 0 : j0 >= MH ? MH - 1 : j0;
-          var jb = j0 + 1 >= MH ? MH - 1 : j0 + 1 < 0 ? 0 : j0 + 1;
-          var val = (md[ja * MW + ia] * (1 - fu) + md[ja * MW + ib] * fu) * (1 - fv) +
-            (md[jb * MW + ia] * (1 - fu) + md[jb * MW + ib] * fu) * fv;
-          var b = val / 255;
-          if (b > 0.004) {
-            // 暗处偏蓝、亮处偏暖白，模拟银河的颜色层次
-            out[o] = 150 + 95 * b;
-            out[o + 1] = 168 + 72 * b;
-            out[o + 2] = 235 - 15 * b;
-            out[o + 3] = Math.min(255, 255 * (0.62 * Math.pow(b, 0.85)));
+          var sb = X * ge + Y * gn + Z * gc; // sin(银纬)
+          if (sb > sinB || sb < -sinB) {
+            out[k] = 0; // 远离银道面，没有银河
           } else {
-            out[o + 3] = 0;
+            var vx = X * ee[0] + Y * en[0] + Z * ec[0];
+            var vy = X * ee[1] + Y * en[1] + Z * ec[1];
+            var vz = Y * en[2] + Z * ec[2];
+            var ra = Math.atan2(vy, vx) * R2D;
+            if (ra < 0) ra += 360;
+            var dec = Math.asin(vz > 1 ? 1 : vz < -1 ? -1 : vz) * R2D;
+            // 在亮度图上双线性取样（赤经方向首尾相接）
+            var u = ra - 0.5, vv = 89.5 - dec;
+            var i0 = Math.floor(u), j0 = Math.floor(vv);
+            var fu = u - i0, fv = vv - j0;
+            var ia = (i0 + MW) % MW, ib = (i0 + 1 + MW) % MW;
+            var ja = j0 < 0 ? 0 : j0 >= MH ? MH - 1 : j0;
+            var jb = j0 + 1 >= MH ? MH - 1 : j0 + 1 < 0 ? 0 : j0 + 1;
+            var val = (md[ja * MW + ia] * (1 - fu) + md[ja * MW + ib] * fu) * (1 - fv) +
+              (md[jb * MW + ia] * (1 - fu) + md[jb * MW + ib] * fu) * fv;
+            var c = lut[(val + 0.5) | 0];
+            out[k] = c;
+            if (c !== 0) {
+              if (i < mx0) mx0 = i;
+              if (i > mx1) mx1 = i;
+              if (j < my0) my0 = j;
+              my1 = j;
+            }
           }
         }
 
         if (zen) {
-          var s = vx * zen[0] + vy * zen[1] + vz * zen[2]; // sin(高度角)
-          if (s < 0) {
-            var depth = Math.min(1, -s / 0.12);
-            gout[o] = 10;
-            gout[o + 1] = 14;
-            gout[o + 2] = 16;
-            gout[o + 3] = 255 * (0.5 + 0.32 * depth);
-          } else if (s < 0.14) {
-            // 地平线附近的一抹大气辉光
-            gout[o] = 70;
-            gout[o + 1] = 100;
-            gout[o + 2] = 150;
-            gout[o + 3] = 255 * 0.12 * (1 - s / 0.14);
+          var s = X * ze + Y * zn + Z * zc; // sin(高度角)
+          if (s < 0.14) {
+            if (s < 0) {
+              // 地平线以下：越往下越暗
+              var depth = -s / 0.12;
+              gout[k] = GROUND_RGB | ((255 * (0.5 + 0.32 * (depth > 1 ? 1 : depth))) << ALPHA_SHIFT);
+            } else {
+              // 地平线附近的一抹大气辉光
+              gout[k] = GLOW_RGB | ((255 * 0.12 * (1 - s / 0.14)) << ALPHA_SHIFT);
+            }
+            if (i < gx0) gx0 = i;
+            if (i > gx1) gx1 = i;
+            if (j < gy0) gy0 = j;
+            gy1 = j;
           } else {
-            gout[o + 3] = 0;
+            gout[k] = 0;
           }
         }
       }
     }
-    if (doMw) this.mwCtx.putImageData(this.mwImg, 0, 0);
-    if (zen) this.groundCtx.putImageData(this.groundImg, 0, 0);
+    if (doMw) {
+      this.mwBox = mx1 >= 0 ? [mx0, my0, mx1, my1] : null;
+      if (this.mwBox) this.mwCtx.putImageData(this.mwImg, 0, 0);
+    }
+    if (zen) {
+      this.groundBox = gx1 >= 0 ? [gx0, gy0, gx1, gy1] : null;
+      if (this.groundBox) this.groundCtx.putImageData(this.groundImg, 0, 0);
+    }
   };
 
   /**
-   * 沿一串单位向量描折线：遇到不可见的点或跨度异常大的线段时断开，避免出现横穿屏幕的直线
+   * 沿一串单位向量描折线：遇到不可见的点或跨度异常大的线段时断开，避免出现横穿屏幕的直线；
+   * 两端都在屏幕同一侧之外的线段不可能经过屏幕，也直接跳过，减少浏览器描边的工作量
    */
   P._tracePath = function (ctx, points) {
     var p = [0, 0];
-    var pen = false, lx = 0, ly = 0;
-    var maxJump = Math.max(this.W, this.H) * 0.7;
+    var pen = false, lx = 0, ly = 0, lc = 0;
+    var W = this.W, H = this.H, M = 40; // M：屏幕边缘外留出的余量（像素）
+    var maxJump = Math.max(W, H) * 0.7;
     for (var i = 0; i < points.length; i++) {
       if (!this._project(points[i], p)) {
         pen = false;
         continue;
       }
-      if (pen && Math.abs(p[0] - lx) + Math.abs(p[1] - ly) < maxJump) {
+      // 点在屏幕外的哪一侧：左 1、右 2、上 4、下 8（在屏幕内为 0）
+      var c = (p[0] < -M ? 1 : p[0] > W + M ? 2 : 0) | (p[1] < -M ? 4 : p[1] > H + M ? 8 : 0);
+      if (pen && (c & lc) === 0 && Math.abs(p[0] - lx) + Math.abs(p[1] - ly) < maxJump) {
         ctx.lineTo(p[0], p[1]);
       } else {
         ctx.moveTo(p[0], p[1]);
@@ -553,14 +688,45 @@
       pen = true;
       lx = p[0];
       ly = p[1];
+      lc = c;
     }
+  };
+
+  /**
+   * 网格线、天赤道、黄道上的采样点（每 2° 一个）。它们只与网格间隔有关、与视图无关，
+   * 按间隔缓存起来，避免每帧重新创建上万个小数组（也减少垃圾回收造成的卡顿）
+   */
+  P._gridPoints = function (raStep, decStep) {
+    var key = raStep + '/' + decStep;
+    if (this._grid && this._grid.key === key) return this._grid;
+    var mer = [], par = [], eq = [], ecl = [];
+    for (var ra = 0; ra < 360 - 1e-6; ra += raStep) {
+      var pts = [];
+      for (var d = -88; d <= 88; d += 2) pts.push(vec(ra, d));
+      mer.push({ ra: ra, pts: pts });
+    }
+    for (var dec = -90 + decStep; dec < 90 - 1e-6; dec += decStep) {
+      if (Math.abs(dec) < 1e-6) continue; // 天赤道单独画
+      var pts2 = [];
+      for (var r = 0; r <= 360; r += 2) pts2.push(vec(r, dec));
+      par.push({ dec: dec, pts: pts2 });
+    }
+    var ce = Math.cos(OBLIQUITY_J2000), se = Math.sin(OBLIQUITY_J2000);
+    for (var e = 0; e <= 360; e += 2) {
+      eq.push(vec(e, 0));
+      var l = e * D2R;
+      ecl.push([Math.cos(l), Math.sin(l) * ce, Math.sin(l) * se]); // 黄道（J2000）
+    }
+    this._grid = { key: key, mer: mer, par: par, eq: eq, ecl: ecl };
+    return this._grid;
   };
 
   /** 赤经赤纬网格 + 天赤道 + 黄道，同时记录网格线与焦点区域边缘的交点，用于放标签 */
   P._drawGrid = function () {
     var ctx = this.ctx;
     var steps = gridSteps(this.fov);
-    var raStep = steps[0], decStep = steps[1];
+    var raStep = steps[0];
+    var G = this._gridPoints(steps[0], steps[1]);
     var f = this.focus;
     var labelY = f.y + f.h - 16; // 赤经标签放在焦点区域底边附近
     var labelX = f.x + 10; // 赤纬标签放在焦点区域左边附近
@@ -569,9 +735,8 @@
 
     // 赤经线（子午圈）
     ctx.beginPath();
-    for (var ra = 0; ra < 360 - 1e-6; ra += raStep) {
-      var pts = [];
-      for (var d = -88; d <= 88; d += 2) pts.push(vec(ra, d));
+    for (var a = 0; a < G.mer.length; a++) {
+      var ra = G.mer[a].ra, pts = G.mer[a].pts;
       this._tracePath(ctx, pts);
       // 找这条线与底边的交点
       for (var k = 0; k + 1 < pts.length; k++) {
@@ -591,10 +756,8 @@
 
     // 赤纬线（赤纬圈），天赤道单独加亮
     ctx.beginPath();
-    for (var dec = -90 + decStep; dec < 90 - 1e-6; dec += decStep) {
-      if (Math.abs(dec) < 1e-6) continue;
-      var pts2 = [];
-      for (var r = 0; r <= 360; r += 2) pts2.push(vec(r, dec));
+    for (var b = 0; b < G.par.length; b++) {
+      var dec = G.par[b].dec, pts2 = G.par[b].pts;
       this._tracePath(ctx, pts2);
       for (var m = 0; m + 1 < pts2.length; m++) {
         if (this._project(pts2[m], p) && this._project(pts2[m + 1], q) &&
@@ -610,23 +773,15 @@
     ctx.stroke();
 
     // 天赤道
-    var eq = [];
-    for (var e = 0; e <= 360; e += 2) eq.push(vec(e, 0));
     ctx.beginPath();
-    this._tracePath(ctx, eq);
+    this._tracePath(ctx, G.eq);
     ctx.strokeStyle = 'rgba(120, 175, 255, 0.32)';
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
     // 黄道（J2000）
-    var ecl = [];
-    var ce = Math.cos(OBLIQUITY_J2000), se = Math.sin(OBLIQUITY_J2000);
-    for (var lam = 0; lam <= 360; lam += 2) {
-      var l = lam * D2R;
-      ecl.push([Math.cos(l), Math.sin(l) * ce, Math.sin(l) * se]);
-    }
     ctx.beginPath();
-    this._tracePath(ctx, ecl);
+    this._tracePath(ctx, G.ecl);
     ctx.setLineDash([6, 6]);
     ctx.strokeStyle = 'rgba(240, 190, 90, 0.38)';
     ctx.lineWidth = 1.1;
@@ -674,6 +829,9 @@
     var ec = this.ec, ee = this.ee, en = this.en, zCut = this.zCut, scale2 = 2 * this.scale, cx = this.cx, cy = this.cy;
     // 视场越小（放大）星点越大一些，但不过分夸张
     var sizeK = clamp(Math.pow(100 / this.fov, 0.3), 0.8, 2.0);
+    // 半径小于约 1.2 个设备像素的暗星（通常占可见星的九成以上）画成等面积的小方块：
+    // 抗锯齿后看上去和圆点一样，但浏览器光栅化方块比圆快得多
+    var tiny = 1.2 / this.dpr;
     var paths = new Array(this.bucketStyles.length);
     var glows = [];
     for (var i = n - 1; i >= 0; i--) {
@@ -697,8 +855,13 @@
       this.pr[i] = r;
       var b = this.sbucket[i];
       var path = paths[b] || (paths[b] = new Path2D());
-      path.moveTo(x + r, y);
-      path.arc(x, y, r, 0, TAU);
+      if (r < tiny) {
+        var hs = r * 0.8862; // 半边长 = r·√π / 2，使方块面积等于圆面积
+        path.rect(x - hs, y - hs, hs * 2, hs * 2);
+      } else {
+        path.moveTo(x + r, y);
+        path.arc(x, y, r, 0, TAU);
+      }
       if (m < 2.3) glows.push(i);
     }
     for (var s = 0; s < paths.length; s++) {
@@ -725,29 +888,35 @@
   /** 地平线（大圆）与东南西北方位标注 */
   P._drawHorizon = function () {
     var ctx = this.ctx;
-    var z = this.horizon.zenith, nrt = this.horizon.north;
-    // 东方向 = 北 × 天顶
-    var east = [nrt[1] * z[2] - nrt[2] * z[1], nrt[2] * z[0] - nrt[0] * z[2], nrt[0] * z[1] - nrt[1] * z[0]];
-    var pts = [];
-    for (var a = 0; a <= 360; a += 2) {
-      var t = a * D2R, c = Math.cos(t), s = Math.sin(t);
-      pts.push([c * nrt[0] + s * east[0], c * nrt[1] + s * east[1], c * nrt[2] + s * east[2]]);
+    var z = this.horizon.zenith;
+    // 地平圈上的采样点和四个方位点只在地平线变化时（约每 10 秒）重新计算
+    if (this._hzFor !== this.horizon) {
+      var nrt = this.horizon.north;
+      // 东方向 = 北 × 天顶
+      var east = [nrt[1] * z[2] - nrt[2] * z[1], nrt[2] * z[0] - nrt[0] * z[2], nrt[0] * z[1] - nrt[1] * z[0]];
+      var around = function (deg) {
+        var t = deg * D2R, c = Math.cos(t), s = Math.sin(t);
+        return [c * nrt[0] + s * east[0], c * nrt[1] + s * east[1], c * nrt[2] + s * east[2]];
+      };
+      var ring = [];
+      for (var a = 0; a <= 360; a += 2) ring.push(around(a));
+      this._hzRing = ring;
+      this._hzCards = [['北', around(0)], ['东', around(90)], ['南', around(180)], ['西', around(270)]];
+      this._hzFor = this.horizon;
     }
     ctx.beginPath();
-    this._tracePath(ctx, pts);
+    this._tracePath(ctx, this._hzRing);
     ctx.strokeStyle = 'rgba(140, 230, 180, 0.55)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
 
-    var cards = [['北', 0], ['东', 90], ['南', 180], ['西', 270]];
+    var cards = this._hzCards;
     var p = [0, 0];
     ctx.font = '600 13px ' + FONT;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (var i = 0; i < cards.length; i++) {
-      var tt = cards[i][1] * D2R;
-      var v = [Math.cos(tt) * nrt[0] + Math.sin(tt) * east[0], Math.cos(tt) * nrt[1] + Math.sin(tt) * east[1],
-        Math.cos(tt) * nrt[2] + Math.sin(tt) * east[2]];
+      var v = cards[i][1];
       if (!this._project(v, p)) continue;
       ctx.fillStyle = 'rgba(8, 20, 16, 0.75)';
       ctx.beginPath();
@@ -803,7 +972,7 @@
       if (c.rank > maxRank || !this._project(c.label, p)) continue;
       var size = c.rank === 1 ? 14 : c.rank === 2 ? 13 : 12;
       ctx.font = size + 'px ' + FONT;
-      var w = ctx.measureText(c.zh).width;
+      var w = this._textWidth(ctx, size, c.zh);
       if (!free(p[0] - w / 2 - 2, p[1] - size / 2 - 2, w + 4, size + 4)) continue;
       ctx.fillStyle = 'rgba(150, 180, 245, 0.5)';
       ctx.fillText(c.zh, p[0], p[1]);
@@ -819,11 +988,23 @@
       if (x !== x) continue; // NaN：不可见
       var y = this.py[idx], r = this.pr[idx];
       var name = this.names.get(idx).zh;
-      var tw = ctx.measureText(name).width;
+      var tw = this._textWidth(ctx, 12, name);
       if (!free(x + r + 3, y - 8, tw + 2, 16)) continue;
       ctx.fillStyle = 'rgba(235, 225, 200, 0.78)';
       ctx.fillText(name, x + r + 4, y + 1);
     }
+  };
+
+  /** 文字宽度：按"字号 + 文字"缓存（星名、星座名是固定的一批），避免每帧重复测量 */
+  P._textWidth = function (ctx, size, text) {
+    var cache = this._widths || (this._widths = new Map());
+    var key = size + '|' + text;
+    var w = cache.get(key);
+    if (w === undefined) {
+      w = ctx.measureText(text).width;
+      cache.set(key, w);
+    }
+    return w;
   };
 
   /** 两个目标之间的大圆弧（虚线）及中点处的角距离文字 */
@@ -949,7 +1130,7 @@
           // 双指缩放
           var ps = Array.from(pointers.values());
           var d = Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]);
-          if (pinchDist > 0 && d > 0) self.zoomBy(pinchDist / d);
+          if (pinchDist > 0 && d > 0) self.zoomBy(pinchDist / d, true); // 双指缩放要跟手，立即生效
           pinchDist = d;
           return;
         }

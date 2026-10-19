@@ -271,6 +271,7 @@
           <button type="button" role="radio" aria-checked="true" data-sys="equatorial">赤道</button>
           <button type="button" role="radio" aria-checked="false" data-sys="galactic">银道</button>
           <button type="button" role="radio" aria-checked="false" data-sys="ecliptic">黄道</button>
+          <button type="button" role="radio" aria-checked="false" data-sys="horizontal" title="输入方位角、高度角，按观测时间与地点反算赤经赤纬">地平</button>
         </div>
         <label class="mini" data-role="bare-wrap">纯数字赤经按
           <select data-role="bare-unit">
@@ -292,6 +293,7 @@
         </label>
       </div>
       <div class="coord__epoch" data-role="epoch"></div>
+      <p class="coord__note" data-role="hz-note" hidden></p>
     </div>
   </template>
 

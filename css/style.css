@@ -718,6 +718,13 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   align-items: center;
   gap: 8px;
 }
+/* 地平坐标输入的说明（方位角起算方向、换算所用的时间与地点） */
+.coord__note {
+  margin: -4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
 
 /* 历元选择器 */
 .epoch {

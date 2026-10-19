@@ -562,8 +562,12 @@
   var SYS_TEXT = {
     equatorial: { a: '赤经 α', b: '赤纬 δ', pa: '05h34m31.9s · 5:34:31.9 · 83.633', pb: '+22°00′52″ · +22 00 52 · 22.0145', name: '赤道坐标' },
     galactic: { a: '银经 l', b: '银纬 b', pa: '184.5575 · 184°33′27″', pb: '-5.7843 · -05°47′03″', name: '银道坐标' },
-    ecliptic: { a: '黄经 λ', b: '黄纬 β', pa: '84.0974 · 84°05′51″', pb: '-1.2944 · -01°17′40″', name: '黄道坐标' }
+    ecliptic: { a: '黄经 λ', b: '黄纬 β', pa: '84.0974 · 84°05′51″', pb: '-1.2944 · -01°17′40″', name: '黄道坐标' },
+    // 地平坐标：按"观测时间与地点"反算赤经赤纬（方位角从正北起算、向东为正）
+    horizontal: { a: '方位角 A', b: '高度角 h', pa: '135.5 · 135°30′', pb: '+45.2 · +45°12′', name: '地平坐标' }
   };
+  // 经度类、纬度类分量的名称（用于解析出错时的提示）
+  var SYS_PARTS = { galactic: ['银经', '银纬'], ecliptic: ['黄经', '黄纬'], horizontal: ['方位角', '高度角'] };
 
   /**
    * @param {HTMLElement} mount 挂载点
@@ -580,6 +584,7 @@
     var inA = role('in-a'), inB = role('in-b');
     var lblA = role('lbl-a'), lblB = role('lbl-b'), hintA = role('hint-a'), hintB = role('hint-b');
     var bareWrap = role('bare-wrap'), bareSel = role('bare-unit');
+    var hzNote = role('hz-note'); // 地平坐标的说明（换算所用的时间、地点）
     var fieldA = inA.closest('.field'), fieldB = inB.closest('.field');
     list.id = opts.id + '-list';
     search.setAttribute('aria-controls', list.id);
@@ -602,7 +607,9 @@
       inA.placeholder = t.pa;
       inB.placeholder = t.pb;
       bareWrap.hidden = s !== 'equatorial';
-      epoch.el.hidden = s === 'galactic'; // 银道坐标与历元无关
+      // 银道坐标与历元无关；地平坐标使用"观测时间与地点"中的时刻，也不需要历元
+      epoch.el.hidden = s === 'galactic' || s === 'horizontal';
+      hzNote.hidden = s !== 'horizontal';
       epoch.setAllowB1950(s === 'equatorial');
       if (!silent) emit();
     }
@@ -613,16 +620,24 @@
         var cur = parse();
         setSys(b.dataset.sys, true);
         if (cur.ok) {
-          var ep = sys === 'galactic' ? null : epoch.resolve();
-          if (sys === 'galactic') {
+          if (sys === 'horizontal') {
+            // 换算成当前观测时间、地点下的方位角和高度角（与"地平坐标"页的口径一致）
+            var o = Astro.observe(cur.v, obsDate(), settings.site, { refraction: settings.refraction });
+            fill(o.az, o.alt);
+            // 固定的方位角、高度角不会跟着天体移动（实时模式下很快就偏离），因此不再沿用天体名称
+            name = null;
+          } else if (sys === 'galactic') {
             var g = Astro.icrsToGalactic(cur.v);
             fill(g.l, g.b);
-          } else if (sys === 'ecliptic' && ep && ep.ok) {
-            var e = Astro.icrsToEcliptic(cur.v, ep.epoch);
-            fill(e.lon, e.lat);
-          } else if (ep && ep.ok) {
-            var q = Astro.icrsToEquatorial(cur.v, ep.epoch);
-            fill(q.ra, q.dec);
+          } else {
+            var ep = epoch.resolve();
+            if (ep.ok && sys === 'ecliptic') {
+              var e = Astro.icrsToEcliptic(cur.v, ep.epoch);
+              fill(e.lon, e.lat);
+            } else if (ep.ok) {
+              var q = Astro.icrsToEquatorial(cur.v, ep.epoch);
+              fill(q.ra, q.dec);
+            }
           }
         }
         emit();
@@ -650,10 +665,16 @@
 
     function parseFirst(text) {
       return sys === 'equatorial' ? Angle.parseRA(text, { bareUnit: bareSel.value })
-        : Angle.parseLongitudeLike(text, sys === 'galactic' ? '银经' : '黄经');
+        : Angle.parseLongitudeLike(text, SYS_PARTS[sys][0]);
     }
     function parseSecond(text) {
-      return sys === 'equatorial' ? Angle.parseDec(text) : Angle.parseLatitudeLike(text, sys === 'galactic' ? '银纬' : '黄纬');
+      return sys === 'equatorial' ? Angle.parseDec(text) : Angle.parseLatitudeLike(text, SYS_PARTS[sys][1]);
+    }
+    /** 地平坐标输入框下方的说明：方位角的起算方向，以及换算所用的时间、地点 */
+    function updateHzNote() {
+      var text = '方位角从正北起算、向东为正（东 90°、南 180°、西 270°）。按下方“观测时间与地点”换算：' + obsLabel() +
+        (settings.refraction ? '；高度角视为含大气折射的观测值。' : '；不计大气折射。');
+      if (hzNote.textContent !== text) hzNote.textContent = text;
     }
     function setFieldState(field, hint, text, err, okText) {
       field.classList.toggle('is-error', !!(text && err));
@@ -679,10 +700,21 @@
       }
       setFieldState(fieldA, hintA, ta, ea, pa && ('识别为' + pa.desc + (sys === 'equatorial' && pa.desc !== '十进制度' ? ' = ' + Angle.formatDecimal(pa.deg, 4) + '°' : '')));
       setFieldState(fieldB, hintB, tb, eb, pb && ('识别为' + pb.desc));
-      var ep = sys === 'galactic' ? { ok: true, epoch: null, label: '' } : epoch.resolve();
+      var ep;
+      if (sys === 'galactic') {
+        ep = { ok: true, epoch: null, label: '' };
+      } else if (sys === 'horizontal') {
+        // 同一方位角、高度角对应的赤经赤纬随时间变化（约每秒 15″），实时模式下由 tick() 每秒重新解析
+        ep = { ok: true, epoch: null, label: obsLabel(), timeDependent: true };
+        updateHzNote();
+      } else {
+        ep = epoch.resolve();
+      }
       epoch.setNote(ep.ok ? '' : ep.error, !ep.ok);
       if (!pa || !pb || !ep.ok) return { ok: false, empty: !ta && !tb, sys: sys };
-      var v = Astro.toICRS(sys, pa.deg, pb.deg, ep.epoch);
+      var v = sys === 'horizontal'
+        ? Astro.horizontalToICRS(pa.deg, pb.deg, obsDate(), settings.site, { refraction: settings.refraction })
+        : Astro.toICRS(sys, pa.deg, pb.deg, ep.epoch);
       return {
         ok: true, sys: sys, a: pa.deg, b: pb.deg, descA: pa.desc, descB: pb.desc,
         epoch: ep.epoch, epochInfo: ep, epochLabel: ep.label,
@@ -1035,6 +1067,10 @@
     var lon = Math.abs(s.lon).toFixed(2) + '°' + (s.lon >= 0 ? 'E' : 'W');
     return s.name + '（' + lat + ', ' + lon + (s.elev ? ', ' + Math.round(s.elev) + ' m' : '') + '）';
   }
+  /** 观测时刻与地点的简短说明，如"实时 · 北京"或"2026-10-19 22:00:00 · 北京"（地平坐标输入、结果标题用） */
+  function obsLabel() {
+    return (timeState.mode === 'live' ? '实时' : fmtDateTime(obsDate(), settings.tz)) + ' · ' + settings.site.name;
+  }
   function updateObserverSummary() {
     var d = obsDate();
     var tzLabel = fmtOffset(tzOffsetMin(d, settings.tz));
@@ -1061,8 +1097,8 @@
    * 键值行列表
    * @param {Array} rows 每行 [标签, 值(文本或节点), 复制文本, 是否强调, 引用键]；
    *                     复制文本为 false 时不显示复制按钮，为空时复制显示的文字
-   * @param {object} [refs] 传入时，带"引用键"的行会登记到 refs[键] = {val, copy}，
-   *                        之后可直接改 val.textContent 与 copy 实现原地更新（实时刷新时不重建 DOM）
+   * @param {object} [refs] 传入时，带"引用键"的行会登记到 refs[键] = {val}，
+   *                        之后可直接改 val.textContent 与 data-copy 实现原地更新（实时刷新时不重建 DOM）
    */
   function kv(rows, refs) {
     var g = h('div', { class: 'kv' });
@@ -1072,22 +1108,31 @@
       var cls = 'kv__v' + (r[3] ? ' kv__v--strong' : '');
       var val = typeof r[1] === 'string' ? h('div', { class: cls, text: r[1] }) : h('div', { class: cls }, [r[1]]);
       g.appendChild(val);
-      var ref = { val: val, copy: r[2] };
-      if (refs && r[4]) refs[r[4]] = ref;
+      if (refs && r[4]) refs[r[4]] = { val: val };
       if (r[2] === false) {
         g.appendChild(h('span', { class: 'copy-spacer' }));
         return;
       }
-      var doCopy = function () { copyText(ref.copy || val.textContent.trim()); };
+      // 要复制的文字记在 data-copy 上（为空表示复制显示的文字），点击由 initCopy() 统一处理。
+      // 不给每个元素单独绑定事件，这样结果被"原地更新"后复制的仍是最新数值
+      val.setAttribute('data-copy', r[2] || '');
       val.title = '点击复制';
       val.style.cursor = 'copy';
-      val.addEventListener('click', doCopy);
       var btn = h('button', { type: 'button', class: 'copy-btn', title: '复制', 'aria-label': '复制' + r[0] });
       btn.innerHTML = COPY_ICON;
-      btn.addEventListener('click', doCopy);
       g.appendChild(btn);
     });
     return g;
+  }
+  /** 结果区的复制（事件委托）：点击数值本身，或点击数值右侧的复制按钮 */
+  function initCopy() {
+    document.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target.closest('.kv__v[data-copy], .copy-btn') : null;
+      if (!t) return;
+      var val = t.classList.contains('copy-btn') ? t.previousElementSibling : t;
+      if (!val || !val.hasAttribute('data-copy')) return;
+      copyText(val.getAttribute('data-copy') || val.textContent.trim());
+    });
   }
   /** 一对坐标（两段文字，窄屏时自动换行） */
   function pair(x, y, note) {
@@ -1107,9 +1152,66 @@
   function notes(lines) {
     return h('div', { class: 'notes' }, lines.map(function (t) { return h('p', { text: t }); }));
   }
+  /**
+   * 清空容器并返回它，供渲染函数往里填内容。
+   * 在 renderPatched() 期间例外：不动页面上的容器，而是返回一个同类型的空白临时容器，
+   * 渲染结束后再把临时容器的内容"合并"到页面上（见 morphChildren）。
+   */
+  var patchList = null;
   function clear(el) {
+    if (patchList) {
+      var tmp = el.cloneNode(false);
+      patchList.push([el, tmp]);
+      return tmp;
+    }
     while (el.firstChild) el.removeChild(el.firstChild);
     return el;
+  }
+
+  /**
+   * 以"原地更新"方式执行渲染函数（实时刷新用）。
+   * 每秒都清空重建 DOM 的话，键盘焦点、鼠标悬停状态和选中的文字都会丢失；
+   * 这里只修改有变化的文字和属性，结构不变的节点原样保留。
+   * 注意：不要用于地平坐标页——它登记了元素引用，由 patchHorizon() 自行原地更新。
+   */
+  function renderPatched(fn) {
+    patchList = [];
+    try {
+      fn();
+    } finally {
+      var list = patchList;
+      patchList = null;
+      list.forEach(function (p) { morphChildren(p[0], p[1]); });
+    }
+  }
+  /** 把 next 的子节点合并进 cur：节点类型、标签相同则同步文字和属性并递归处理子节点，不同则替换 */
+  function morphChildren(cur, next) {
+    var src = Array.prototype.slice.call(next.childNodes);
+    for (var i = 0; i < src.length; i++) {
+      var old = cur.childNodes[i], node = src[i];
+      if (!old) {
+        cur.appendChild(node);
+      } else if (old.nodeType !== node.nodeType || old.nodeName !== node.nodeName) {
+        cur.replaceChild(node, old);
+      } else if (node.nodeType === 3) {
+        if (old.data !== node.data) old.data = node.data; // 文字节点
+      } else if (node.nodeType === 1) {
+        syncAttrs(old, node);
+        morphChildren(old, node);
+      }
+    }
+    while (cur.childNodes.length > src.length) cur.removeChild(cur.lastChild);
+  }
+  function syncAttrs(old, node) {
+    var i, a;
+    for (i = old.attributes.length - 1; i >= 0; i--) {
+      a = old.attributes[i];
+      if (!node.hasAttribute(a.name)) old.removeAttribute(a.name);
+    }
+    for (i = 0; i < node.attributes.length; i++) {
+      a = node.attributes[i];
+      if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
+    }
   }
 
   /* ---------- 坐标转换 ---------- */
@@ -1158,17 +1260,29 @@
     var gal = Astro.icrsToGalactic(v);
     var ecl = Astro.icrsToEcliptic(v, { kind: 'J2000' });
     var con = Astro.constellationOf(v, Data.constellationBounds);
-    sysEl.appendChild(kv([
-      ['赤道 J2000', pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec)],
+    var isHz = A.sys === 'horizontal'; // 由地平坐标反算时，赤经赤纬就是要找的结果，加粗显示
+    var sysRows = [
+      ['赤道 J2000', pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), isHz],
       ['赤道 B1950', pair(fRA(b1950.ra), fDec(b1950.dec)), fRA(b1950.ra) + ' ' + fDec(b1950.dec)],
       ['银道 l, b', pair(fDeg(gal.l), fDeg(gal.b, true)), Angle.formatDecimal(gal.l, prec()[0] + 4) + ' ' + Angle.formatDecimal(gal.b, prec()[0] + 4, true)],
       ['黄道 λ, β', pair(fDeg(ecl.lon), fDeg(ecl.lat, true), 'J2000'), Angle.formatDecimal(ecl.lon, prec()[0] + 4) + ' ' + Angle.formatDecimal(ecl.lat, prec()[0] + 4, true)],
       ['所在星座', con ? constellationName(con) + '（' + con + '）' : '—', con ? constellationName(con) : '']
-    ]));
-    sysEl.appendChild(notes([
+    ];
+    var sysNotes = [
       'J2000 即 ICRS 赤道坐标；B1950 为 FK4 参考系（含 E 项改正），按 SLALIB FK45Z/FK54Z 算法换算。',
       '银道坐标采用 IAU 1958 定义；黄道坐标为 J2000 平黄道、平春分点。其他历元请到“历元岁差”页查看。'
-    ]));
+    ];
+    if (isHz) {
+      // 地平坐标输入：另外给出观测时刻的视赤经赤纬（赤道仪、望远镜控制软件常用的 JNow 坐标）和时角
+      var o = Astro.observe(v, obsDate(), settings.site, { refraction: settings.refraction });
+      sysRows.splice(1, 0,
+        ['赤道 视位置', pair(fRA(o.raApp), fDec(o.decApp), 'JNow'), fRA(o.raApp) + ' ' + fDec(o.decApp), true],
+        ['时角 HA', fHMSsigned(o.ha), fHMSsigned(o.ha)]);
+      sysNotes.unshift('地平坐标按观测时间与地点换算：由方位角、高度角求出时角和视赤纬（勾选大气折射时先扣除折射），' +
+        '视赤经 = 地方视恒星时 − 时角，再换算到 J2000。' + (timeState.mode === 'live' ? '实时模式下结果每秒更新。' : ''));
+    }
+    sysEl.appendChild(kv(sysRows));
+    sysEl.appendChild(notes(sysNotes));
   }
 
   /* ---------- 历元岁差 ---------- */
@@ -1340,7 +1454,7 @@
       var ref = hz.rows[row[4]];
       if (!ref) return;
       if (ref.val.textContent !== row[1]) ref.val.textContent = row[1];
-      ref.copy = row[2];
+      if (row[2] !== false) ref.val.setAttribute('data-copy', row[2] || '');
     });
   }
 
@@ -1358,8 +1472,10 @@
     else patchHorizon(m);
 
     // 高度角曲线：当地正午到次日正午；只在输入变化或分钟变化时重绘
+    // （地平坐标输入在实时模式下每秒都会得到新的赤经赤纬，这里按输入的方位角、高度角判断，避免每秒重画）
     var site = settings.site;
-    var key = [A.v.join(','), site.lat, site.lon, site.elev, settings.tz, settings.refraction, Math.floor(m.date.getTime() / 60000)].join('|');
+    var target = A.sys === 'horizontal' ? 'hz:' + A.a + ',' + A.b : A.v.join(',');
+    var key = [target, site.lat, site.lon, site.elev, settings.tz, settings.refraction, Math.floor(m.date.getTime() / 60000)].join('|');
     if (force || key !== lastChartKey) {
       lastChartKey = key;
       renderChart(m.date);
@@ -1708,16 +1824,21 @@
     $('#clock-lst').textContent = Angle.formatHMS(lst, 0, 'colon');
     if (fromChange === true || timeState.mode !== 'live') return;
     tickCount++;
-    // 输入的历元若是"观测时刻"，坐标本身也随时间变化
+    // 输入的历元若是"观测时刻"，或输入的是地平坐标，坐标本身也随时间变化
     if (A.ok && A.epochInfo && A.epochInfo.timeDependent) A = coordA.parse();
     if (B.ok && B.epochInfo && B.epochInfo.timeDependent) B = coordB.parse();
+    // 地平坐标输入：同一方位角、高度角对应的赤经赤纬约每秒变化 15″，结果页与星图标记都要每秒刷新
+    var liveA = A.ok && A.sys === 'horizontal', liveB = B.ok && B.sys === 'horizontal';
     if (settings.tab === 'horizon') {
-      var o = renderHorizon(false);
+      var o = renderHorizon(false); // 地平坐标页有自己的原地更新逻辑
       updateHud(o || undefined);
     } else {
-      if (tickCount % 5 === 0) updateHud();
-      if (settings.tab === 'epoch' && epochOut.mode() === 'obs' && tickCount % 30 === 0) renderEpoch();
+      if (liveA || liveB) renderPatched(renderActive); // 原地更新，不打断复制、选中文字等操作
+      if (liveA || tickCount % 5 === 0) updateHud();
+      if (settings.tab === 'epoch' && epochOut.mode() === 'obs' && tickCount % 30 === 0 && !(liveA || liveB)) renderPatched(renderEpoch);
     }
+    if (liveA && map) map.setMarker('target', A.icrs); // 只移动标记，不让星图跟着飞
+    if (liveA || liveB) updateSecondaryOnMap();
     if (tickCount % 10 === 0) {
       updateHorizonOnMap();
       updateObserverSummary();
@@ -1776,6 +1897,7 @@
     Search.build(map);
     initTabs();
     initPick();
+    initCopy();
 
     // 输出历元选择器（历元岁差页），默认"观测时刻"
     epochOut = createEpochPicker($('#epoch-out'), { name: 'epoch-out', label: '目标历元', defaultMode: 'obs', allowApparent: false, onChange: renderEpoch });
