@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>赤经赤纬计算器</title>
+  <meta name="description" content="赤经赤纬（RA/Dec）在线计算：格式转换，赤道/银道/黄道坐标转换，J2000、B1950 与任意日期历元的岁差和视位置，地平坐标与升落时刻，角距离；以真实星表绘制的星图为背景。">
+  <meta name="theme-color" content="#04060d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230a1230'/%3E%3Cellipse cx='32' cy='32' rx='26' ry='9' fill='none' stroke='%23f2c46d' stroke-width='2.5' transform='rotate(-24 32 32)'/%3E%3Cpath d='M32 14l3.2 9.6 10 .1-8 6 3 9.7-8.2-5.8-8.2 5.8 3-9.7-8-6 10-.1z' fill='%23ffe3a3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- ============ 背景星图（由 js/starmap.js 绘制） ============ -->
+  <canvas id="sky" class="sky" role="img" aria-label="星图背景：可拖动平移、滚轮缩放，点击可拾取该处坐标"></canvas>
+
+  <!-- 目标准星：位置由星图模块根据投影结果实时更新 -->
+  <div id="marker-target" class="marker marker--target" hidden aria-hidden="true">
+    <svg viewBox="-40 -40 80 80">
+      <circle class="marker__pulse" r="30"></circle>
+      <circle class="marker__ring" r="17"></circle>
+      <g class="marker__ticks">
+        <line x1="0" y1="-30" x2="0" y2="-21"></line><line x1="0" y1="21" x2="0" y2="30"></line>
+        <line x1="-30" y1="0" x2="-21" y2="0"></line><line x1="21" y1="0" x2="30" y2="0"></line>
+      </g>
+      <circle class="marker__dot" r="2.2"></circle>
+    </svg>
+    <span class="marker__label" id="marker-target-label">目标</span>
+  </div>
+  <div id="marker-secondary" class="marker marker--secondary" hidden aria-hidden="true">
+    <svg viewBox="-40 -40 80 80">
+      <circle class="marker__ring" r="13"></circle>
+      <circle class="marker__dot" r="2"></circle>
+    </svg>
+    <span class="marker__label" id="marker-secondary-label">B</span>
+  </div>
+
+  <!-- 星图悬停提示、点击拾取弹窗 -->
+  <div id="star-tip" class="star-tip" hidden></div>
+  <div id="pick-pop" class="pick-pop" hidden role="dialog" aria-label="星图拾取的坐标">
+    <div class="pick-pop__title" id="pick-title"></div>
+    <div class="pick-pop__coord" id="pick-coord"></div>
+    <div class="pick-pop__actions">
+      <button type="button" class="btn btn--primary" id="pick-set-a">设为目标</button>
+      <button type="button" class="btn" id="pick-set-b">设为目标 B</button>
+      <button type="button" class="btn btn--ghost" id="pick-close" aria-label="关闭">✕</button>
+    </div>
+  </div>
+
+  <div class="app" id="app">
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand__logo" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <radialGradient id="logo-bg" cx="40%" cy="35%" r="70%">
+              <stop offset="0" stop-color="#1d2d63"/><stop offset="1" stop-color="#070b1d"/>
+            </radialGradient>
+          </defs>
+          <circle cx="32" cy="32" r="29" fill="url(#logo-bg)" stroke="rgba(242,196,109,.55)" stroke-width="1.5"/>
+          <ellipse cx="32" cy="32" rx="29" ry="10" fill="none" stroke="rgba(124,199,255,.55)" stroke-width="1.2"/>
+          <ellipse cx="32" cy="32" rx="10" ry="29" fill="none" stroke="rgba(124,199,255,.35)" stroke-width="1"/>
+          <ellipse cx="32" cy="32" rx="27" ry="8" fill="none" stroke="#f2c46d" stroke-width="1.6" transform="rotate(-23.4 32 32)"/>
+          <circle cx="44" cy="22" r="2.6" fill="#ffe7b0"/>
+          <circle cx="20" cy="40" r="1.4" fill="#cfe0ff"/>
+          <circle cx="26" cy="18" r="1" fill="#cfe0ff"/>
+        </svg>
+        <div class="brand__text">
+          <h1 class="brand__title">赤经赤纬计算器</h1>
+          <p class="brand__sub">RA · Dec Calculator</p>
+        </div>
+      </div>
+      <div class="clock" aria-live="off">
+        <div class="clock__item"><span class="clock__k">UTC</span><span class="clock__v" id="clock-utc">--:--:--</span></div>
+        <div class="clock__item"><span class="clock__k" id="clock-local-k">本地</span><span class="clock__v" id="clock-local">--:--:--</span></div>
+        <div class="clock__item"><span class="clock__k">地方恒星时</span><span class="clock__v" id="clock-lst">--:--:--</span></div>
+      </div>
+      <div class="topbar__actions">
+        <button type="button" class="icon-btn" id="btn-night" aria-pressed="false" title="红光夜视模式（保护暗适应）">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
+          <span class="sr-only">红光夜视模式</span>
+        </button>
+        <button type="button" class="icon-btn" id="btn-hide" aria-pressed="false" title="隐藏面板，全屏查看星图">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          <span class="sr-only">全屏星图</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- ============ 左侧面板 ============ -->
+      <div class="panel-column" id="panel-column">
+
+        <!-- 卡片 1：目标天体坐标输入 -->
+        <section class="card" aria-labelledby="h-target">
+          <div class="card__head">
+            <h2 id="h-target">目标天体</h2>
+            <span class="badge" id="target-badge" hidden></span>
+          </div>
+          <div id="coord-a"></div>
+        </section>
+
+        <!-- 卡片 2：观测时间与地点（可折叠） -->
+        <section class="card card--observer" aria-labelledby="h-observer">
+          <button type="button" class="card__toggle" id="obs-toggle" aria-expanded="false" aria-controls="obs-body">
+            <span class="card__toggle-title" id="h-observer">观测时间与地点</span>
+            <span class="obs-summary" id="obs-summary"></span>
+            <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="obs-body" id="obs-body" hidden>
+            <div class="form-row">
+              <span class="form-row__label">时间</span>
+              <div class="seg" role="radiogroup" aria-label="时间模式" id="time-mode">
+                <button type="button" role="radio" aria-checked="true" data-mode="live">实时</button>
+                <button type="button" role="radio" aria-checked="false" data-mode="custom">指定时间</button>
+              </div>
+            </div>
+            <div class="form-row" id="time-custom-row" hidden>
+              <span class="form-row__label"></span>
+              <div class="inline">
+                <input type="datetime-local" id="obs-time" step="1" aria-label="观测时间（所选时区）">
+                <button type="button" class="btn btn--small" id="obs-now">现在</button>
+                <button type="button" class="btn btn--small" id="obs-tonight">今晚 22:00</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label class="form-row__label" for="obs-tz">时区</label>
+              <select id="obs-tz"></select>
+            </div>
+            <div class="form-row">
+              <label class="form-row__label" for="obs-site">地点</label>
+              <div class="inline">
+                <select id="obs-site"></select>
+                <button type="button" class="btn btn--small" id="obs-geo" title="使用浏览器定位">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
+                  定位
+                </button>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label class="field field--compact">
+                <span class="field__label">纬度</span>
+                <input id="obs-lat" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="39.9042 或 39°54′N">
+                <span class="field__hint" id="obs-lat-hint"></span>
+              </label>
+              <label class="field field--compact">
+                <span class="field__label">经度（东经为正）</span>
+                <input id="obs-lon" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="116.4074 或 116°24′E">
+                <span class="field__hint" id="obs-lon-hint"></span>
+              </label>
+              <label class="field field--compact">
+                <span class="field__label">海拔（米）</span>
+                <input id="obs-elev" inputmode="decimal" autocomplete="off" placeholder="0">
+                <span class="field__hint"></span>
+              </label>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="obs-refraction" checked>
+              <span>计入大气折射（影响高度角与升落时刻）</span>
+            </label>
+          </div>
+        </section>
+
+        <!-- 卡片 3：计算结果（四个标签页） -->
+        <section class="card card--results" aria-label="计算结果">
+          <div class="tabs" role="tablist" aria-label="功能">
+            <button type="button" role="tab" id="tab-btn-convert" aria-controls="tab-convert" aria-selected="true">坐标转换</button>
+            <button type="button" role="tab" id="tab-btn-epoch" aria-controls="tab-epoch" aria-selected="false" tabindex="-1">历元岁差</button>
+            <button type="button" role="tab" id="tab-btn-horizon" aria-controls="tab-horizon" aria-selected="false" tabindex="-1">地平坐标</button>
+            <button type="button" role="tab" id="tab-btn-sep" aria-controls="tab-sep" aria-selected="false" tabindex="-1">角距离</button>
+          </div>
+
+          <!-- 坐标转换 -->
+          <div class="tab-panel" id="tab-convert" role="tabpanel" aria-labelledby="tab-btn-convert">
+            <div class="panel-tools">
+              <label class="mini">显示精度
+                <select id="precision">
+                  <option value="low">低（0.1s / 1″）</option>
+                  <option value="std" selected>标准（0.01s / 0.1″）</option>
+                  <option value="high">高（0.001s / 0.01″）</option>
+                </select>
+              </label>
+            </div>
+            <div id="out-format"></div>
+            <div id="out-systems"></div>
+          </div>
+
+          <!-- 历元岁差 -->
+          <div class="tab-panel" id="tab-epoch" role="tabpanel" aria-labelledby="tab-btn-epoch" hidden>
+            <div class="form-row form-row--wrap">
+              <span class="form-row__label">换算到</span>
+              <div id="epoch-out"></div>
+            </div>
+            <div id="out-epoch"></div>
+          </div>
+
+          <!-- 地平坐标 -->
+          <div class="tab-panel" id="tab-horizon" role="tabpanel" aria-labelledby="tab-btn-horizon" hidden>
+            <div class="site-line">
+              <span id="out-site"></span>
+              <button type="button" class="link-btn" id="edit-site">修改时间/地点</button>
+            </div>
+            <div id="out-horizon"></div>
+            <div id="alt-chart"></div>
+          </div>
+
+          <!-- 角距离 -->
+          <div class="tab-panel" id="tab-sep" role="tabpanel" aria-labelledby="tab-btn-sep" hidden>
+            <p class="lead">计算目标 A（上方输入）与目标 B 之间的角距离和位置角。</p>
+            <div class="sub-card">
+              <div class="sub-card__title">目标 B</div>
+              <div id="coord-b"></div>
+            </div>
+            <div id="out-sep"></div>
+          </div>
+        </section>
+
+        <footer class="credits">
+          <p>星表：XHIP（Anderson &amp; Francis 2012），经 <a href="https://github.com/ofrohn/d3-celestial" target="_blank" rel="noopener">d3-celestial</a>（BSD-3-Clause）整理；星座边界：Roman（1987）；常用天体坐标与在线查询：<a href="https://simbad.cds.unistra.fr/" target="_blank" rel="noopener">SIMBAD / Sesame（CDS）</a>。</p>
+          <p>算法：IAU 2006 岁差、IAU 1980 章动（主要 34 项）、周年光行差、FK4/FK5 转换（SLALIB 算法）。精度约 0.1″（忽略 UT1−UTC、极移、周日光行差与自行）。</p>
+        </footer>
+      </div>
+
+      <!-- ============ 右侧星图区域（透明，透出背景星图） ============ -->
+      <div class="map-stage" id="map-stage">
+        <div class="map-hud" id="map-hud">
+          <div class="map-hud__name" id="hud-name"></div>
+          <div class="map-hud__coord" id="hud-coord"></div>
+          <div class="map-hud__meta" id="hud-meta"></div>
+        </div>
+        <p class="map-hint" id="map-hint">拖动平移 · 滚轮缩放 · 点击星图拾取坐标</p>
+        <div class="map-controls" role="toolbar" aria-label="星图控制">
+          <button type="button" class="icon-btn" id="zoom-in" title="放大">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="sr-only">放大</span>
+          </button>
+          <button type="button" class="icon-btn" id="zoom-out" title="缩小">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg><span class="sr-only">缩小</span>
+          </button>
+          <button type="button" class="icon-btn" id="recenter" title="回到目标">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span class="sr-only">回到目标</span>
+          </button>
+          <div class="layers">
+            <button type="button" class="icon-btn" id="layers-btn" aria-expanded="false" aria-controls="layers-menu" title="图层">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg><span class="sr-only">图层</span>
+            </button>
+            <div class="layers__menu" id="layers-menu" hidden>
+              <label class="check"><input type="checkbox" name="layer-milkyway" data-layer="milkyway" checked><span>银河</span></label>
+              <label class="check"><input type="checkbox" name="layer-lines" data-layer="lines" checked><span>星座连线</span></label>
+              <label class="check"><input type="checkbox" name="layer-names" data-layer="names" checked><span>星名与星座名</span></label>
+              <label class="check"><input type="checkbox" name="layer-grid" data-layer="grid" checked><span>赤经赤纬网格</span></label>
+              <label class="check"><input type="checkbox" name="layer-horizon" data-layer="horizon" checked><span>地平线</span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="night-filter" aria-hidden="true"></div>
+
+  <!-- 坐标输入组件模板（目标 A 与目标 B 共用） -->
+  <template id="tpl-coord">
+    <div class="coord">
+      <div class="search">
+        <svg class="search__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" data-role="search" placeholder="搜索天体：M31、天狼星、Vega、α Ori、NGC 7000…" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false">
+        <ul class="search__list" data-role="search-list" role="listbox" hidden></ul>
+      </div>
+      <div class="coord__row">
+        <div class="seg" role="radiogroup" aria-label="坐标系" data-role="sys">
+          <button type="button" role="radio" aria-checked="true" data-sys="equatorial">赤道</button>
+          <button type="button" role="radio" aria-checked="false" data-sys="galactic">银道</button>
+          <button type="button" role="radio" aria-checked="false" data-sys="ecliptic">黄道</button>
+        </div>
+        <label class="mini" data-role="bare-wrap">纯数字赤经按
+          <select data-role="bare-unit">
+            <option value="deg">度</option>
+            <option value="hour">小时</option>
+          </select>
+        </label>
+      </div>
+      <div class="coord__inputs">
+        <label class="field">
+          <span class="field__label" data-role="lbl-a">赤经 α</span>
+          <input data-role="in-a" autocomplete="off" spellcheck="false" inputmode="text">
+          <span class="field__hint" data-role="hint-a"></span>
+        </label>
+        <label class="field">
+          <span class="field__label" data-role="lbl-b">赤纬 δ</span>
+          <input data-role="in-b" autocomplete="off" spellcheck="false" inputmode="text">
+          <span class="field__hint" data-role="hint-b"></span>
+        </label>
+      </div>
+      <div class="coord__epoch" data-role="epoch"></div>
+    </div>
+  </template>
+
+  <!-- 数据（星表、星座、银河、常用天体） -->
+  <script src="data/stars.js"></script>
+  <script src="data/constellations.js"></script>
+  <script src="data/milkyway.js"></script>
+  <script src="data/objects.js"></script>
+  <!-- 功能模块 -->
+  <script src="js/angle.js"></script>
+  <script src="js/astro.js"></script>
+  <script src="js/starmap.js"></script>
+  <script src="js/altchart.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
