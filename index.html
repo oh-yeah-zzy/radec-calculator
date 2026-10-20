@@ -176,6 +176,11 @@
           <!-- 坐标转换 -->
           <div class="tab-panel" id="tab-convert" role="tabpanel" aria-labelledby="tab-btn-convert">
             <div class="panel-tools">
+              <!-- 赤经赤纬显示形式开关：作用于四个标签页结果中的赤经赤纬（"格式转换"一节本来就列出全部格式，不受影响） -->
+              <label class="check mini" title="勾选后，各页结果中的赤经赤纬显示为十进制度；不勾选为时分秒 / 度分秒">
+                <input type="checkbox" id="radec-deg">
+                <span>赤经赤纬显示为十进制度</span>
+              </label>
               <label class="mini">显示精度
                 <select id="precision">
                   <option value="low">低（0.1s / 1″）</option>

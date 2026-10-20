@@ -877,7 +877,10 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 .panel-tools {
   display: flex;
+  flex-wrap: wrap; /* 窄屏时"十进制度"开关与"显示精度"放不下一行就折行 */
   justify-content: flex-end;
+  align-items: center;
+  gap: 6px 16px;
   margin-bottom: 4px;
 }
 .lead {

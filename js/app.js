@@ -280,6 +280,7 @@
     tz: browserTz,
     refraction: true,
     precision: 'std',
+    radecDeg: false, // 结果区的赤经赤纬是否显示为十进制度（否则为时分秒 / 度分秒）
     tab: 'convert',
     night: false,
     layers: { milkyway: true, lines: true, names: true, grid: true, horizon: true }
@@ -318,6 +319,26 @@
   }
   function fDeg(deg, signed) {
     return Angle.formatDecimal(deg, prec()[0] + 4, signed) + '°';
+  }
+  /**
+   * 结果区的一对赤经赤纬 → [赤经文字, 赤纬文字, 复制文字]。
+   * 按"赤经赤纬显示为十进制度"开关：时分秒 + 度分秒，或十进制度（小数位与 fDeg 相同，随显示精度变化）。
+   * 十进制度复制时不带 ° 符号，与"整行（十进制度）"一致，便于粘贴到其他软件
+   */
+  function radecParts(ra, dec) {
+    if (settings.radecDeg) {
+      var n = prec()[0] + 4;
+      var a = Angle.formatDecimal(ra, n), d = Angle.formatDecimal(dec, n, true);
+      if (+a >= 360) a = (0).toFixed(n); // 赤经紧挨 360° 时，舍入后可能变成 360，统一显示为 0
+      return [a + '°', d + '°', a + ' ' + d];
+    }
+    var r = fRA(ra), s = fDec(dec);
+    return [r, s, r + ' ' + s];
+  }
+  /** 结果表（kv）中的一行赤经赤纬：[标签, 两段坐标, 复制文字, 是否强调] */
+  function radecRow(label, ra, dec, strong, note) {
+    var p = radecParts(ra, dec);
+    return [label, pair(p[0], p[1], note), p[2], strong];
   }
   /** 带符号的时分秒（时角、赤经差等） */
   function fHMSsigned(hours, decimals) {
@@ -1322,8 +1343,8 @@
     var con = Astro.constellationOf(v, Data.constellationBounds);
     var isHz = A.sys === 'horizontal'; // 由地平坐标反算时，赤经赤纬就是要找的结果，加粗显示
     var sysRows = [
-      [T('赤道 J2000'), pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), isHz],
-      [T('赤道 B1950'), pair(fRA(b1950.ra), fDec(b1950.dec)), fRA(b1950.ra) + ' ' + fDec(b1950.dec)],
+      radecRow(T('赤道 J2000'), j.ra, j.dec, isHz),
+      radecRow(T('赤道 B1950'), b1950.ra, b1950.dec),
       [T('银道 l, b'), pair(fDeg(gal.l), fDeg(gal.b, true)), Angle.formatDecimal(gal.l, prec()[0] + 4) + ' ' + Angle.formatDecimal(gal.b, prec()[0] + 4, true)],
       [T('黄道 λ, β'), pair(fDeg(ecl.lon), fDeg(ecl.lat, true), 'J2000'), Angle.formatDecimal(ecl.lon, prec()[0] + 4) + ' ' + Angle.formatDecimal(ecl.lat, prec()[0] + 4, true)],
       [T('所在星座'), con ? constellationName(con) + paren(con) : '—', con ? constellationName(con) : '']
@@ -1336,7 +1357,7 @@
       // 地平坐标输入：另外给出观测时刻的视赤经赤纬（赤道仪、望远镜控制软件常用的 JNow 坐标）和时角
       var o = Astro.observe(v, obsDate(), settings.site, { refraction: settings.refraction });
       sysRows.splice(1, 0,
-        [T('赤道 视位置'), pair(fRA(o.raApp), fDec(o.decApp), 'JNow'), fRA(o.raApp) + ' ' + fDec(o.decApp), true],
+        radecRow(T('赤道 视位置'), o.raApp, o.decApp, true, 'JNow'),
         [T('时角 HA'), fHMSsigned(o.ha), fHMSsigned(o.ha)]);
       sysNotes.unshift(T('地平坐标按观测时间与地点换算：由方位角、高度角求出时角和视赤纬（勾选大气折射时先扣除折射），' +
         '视赤经 = 地方视恒星时 − 时角，再换算到 J2000。') + (timeState.mode === 'live' ? T('实时模式下结果每秒更新。') : ''));
@@ -1359,19 +1380,19 @@
     var v = A.v;
     var j = A.icrs;
     var rows = [];
-    rows.push([T('输入（J2000）'), pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec)]);
+    rows.push(radecRow(T('输入（J2000）'), j.ra, j.dec));
     var main;
     if (r.epoch.kind === 'J2000') {
       main = j;
-      rows.push([T('J2000.0 位置'), pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), true]);
+      rows.push(radecRow(T('J2000.0 位置'), j.ra, j.dec, true));
     } else if (r.epoch.kind === 'B1950') {
       main = Astro.icrsToFk4(v);
-      rows.push(['B1950.0' + paren('FK4'), pair(fRA(main.ra), fDec(main.dec)), fRA(main.ra) + ' ' + fDec(main.dec), true]);
+      rows.push(radecRow('B1950.0' + paren('FK4'), main.ra, main.dec, true));
     } else {
       main = Astro.icrsToEquatorial(v, { kind: 'jd', jdTT: r.jdTT });
       var app = Astro.icrsToEquatorial(v, { kind: 'jd', jdTT: r.jdTT, apparent: true });
-      rows.push([T('平位置'), pair(fRA(main.ra), fDec(main.dec)), fRA(main.ra) + ' ' + fDec(main.dec), true]);
-      rows.push([T('视位置'), pair(fRA(app.ra), fDec(app.dec)), fRA(app.ra) + ' ' + fDec(app.dec), true]);
+      rows.push(radecRow(T('平位置'), main.ra, main.dec, true));
+      rows.push(radecRow(T('视位置'), app.ra, app.dec, true));
     }
     var dRa = ((main.ra - j.ra + 540) % 360) - 180;
     var dDec = main.dec - j.dec;
@@ -1461,6 +1482,7 @@
     }
     // 详细数值：[标签, 文字, 复制文字, 强调, 引用键]；精度都随"显示精度"变化
     var sd = prec()[0]; // 恒星时秒的小数位，与赤经一致
+    var appPos = radecParts(o.raApp, o.decApp); // 视赤经赤纬：按开关显示时分秒/度分秒或十进制度
     var rows = [
       [T('高度角 度分秒'), fDec(o.alt), fDec(o.alt), false, 'altDms'],
       [T('方位角 度分秒'), azDms, azDms, false, 'azDms'],
@@ -1469,7 +1491,7 @@
       [T('地方平恒星时'), Angle.formatHMS(o.lmst, sd), Angle.formatHMS(o.lmst, sd), false, 'lmst'],
       [T('格林尼治视恒星时'), Angle.formatHMS(o.gast, sd), Angle.formatHMS(o.gast, sd), false, 'gast'],
       [T('格林尼治平恒星时'), Angle.formatHMS(o.gmst, sd), Angle.formatHMS(o.gmst, sd), false, 'gmst'],
-      [T('视赤经、视赤纬'), fRA(o.raApp) + '  ' + fDec(o.decApp), fRA(o.raApp) + ' ' + fDec(o.decApp), false, 'app'],
+      [T('视赤经、视赤纬'), appPos[0] + '  ' + appPos[1], appPos[2], false, 'app'],
       [T('大气质量'), o.airmass ? o.airmass.toFixed(3) : T('—（地平线以下）'), o.airmass ? o.airmass.toFixed(3) : '', false, 'airmass'],
       [T('大气折射'), settings.refraction ? (o.refraction > 0 ? '+' + (o.refraction * 60).toFixed(2) + '′' : T('0（地平线以下不计）')) : T('未计入'), false, false, 'refr'],
       [T('星位角 q'), Angle.formatDecimal(o.parallactic, hd - 1, true) + '°', Angle.formatDecimal(o.parallactic, hd - 1, true), false, 'pa']
@@ -1632,8 +1654,8 @@
       rows.push([T('向东偏移 ξ'), fDeltaArc(xi), fDeltaArc(xi)]);
       rows.push([T('向北偏移 η'), fDeltaArc(eta), fDeltaArc(eta)]);
     }
-    rows.push(['A' + paren('J2000'), pair(fRA(A.icrs.ra), fDec(A.icrs.dec)), fRA(A.icrs.ra) + ' ' + fDec(A.icrs.dec)]);
-    rows.push(['B' + paren('J2000'), pair(fRA(B.icrs.ra), fDec(B.icrs.dec)), fRA(B.icrs.ra) + ' ' + fDec(B.icrs.dec)]);
+    rows.push(radecRow('A' + paren('J2000'), A.icrs.ra, A.icrs.dec));
+    rows.push(radecRow('B' + paren('J2000'), B.icrs.ra, B.icrs.dec));
     out.appendChild(sectionTitle(T('详细数值')));
     out.appendChild(kv(rows));
     var sepNotes = [T('两个坐标会先各自换算到 ICRS（J2000）再计算，因此可以混用不同坐标系和历元。')];
@@ -1989,6 +2011,14 @@
     precSel.value = settings.precision;
     precSel.addEventListener('change', function () {
       settings.precision = precSel.value;
+      saveSettings();
+      renderActive();
+    });
+    // 赤经赤纬显示形式开关（与显示精度一样保存在本地设置中，作用于所有标签页）
+    var degChk = $('#radec-deg');
+    degChk.checked = !!settings.radecDeg;
+    degChk.addEventListener('change', function () {
+      settings.radecDeg = degChk.checked;
       saveSettings();
       renderActive();
     });

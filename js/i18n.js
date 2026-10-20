@@ -223,6 +223,9 @@
     '历元岁差': 'Precession',
     '角距离': 'Separation',
     '显示精度': 'Precision',
+    '赤经赤纬显示为十进制度': 'RA/Dec in decimal degrees',
+    '勾选后，各页结果中的赤经赤纬显示为十进制度；不勾选为时分秒 / 度分秒':
+      'When checked, RA/Dec in the results are shown in decimal degrees; otherwise as h m s / ° ′ ″',
     '低（0.1s / 1″）': 'Low (0.1s / 1″)',
     '标准（0.01s / 0.1″）': 'Standard (0.01s / 0.1″)',
     '高（0.001s / 0.01″）': 'High (0.001s / 0.01″)',
