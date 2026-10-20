@@ -357,7 +357,7 @@
     // ---- 页脚 ----
     '星表：XHIP（Anderson & Francis 2012），经': 'Star catalog: XHIP (Anderson & Francis 2012), compiled by',
     '（BSD-3-Clause）整理；星座边界：Roman（1987）；常用天体坐标与在线查询：':
-      ' (BSD-3-Clause); constellation boundaries: Roman (1987); object coordinates and online lookup:',
+      ' (BSD-3-Clause); constellation boundaries: Roman (1987); object coordinates and online lookup: ',
     'SIMBAD / Sesame（CDS）': 'SIMBAD / Sesame (CDS)',
     '。': '.',
     '算法：IAU 2006 岁差、IAU 1980 章动（主要 34 项）、周年光行差、FK4/FK5 转换（SLALIB 算法）。精度约 0.1″（忽略 UT1−UTC、极移、周日光行差与自行）。':

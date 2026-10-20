@@ -4,7 +4,7 @@
  * 展示目标天体在一个夜晚（当地正午到次日正午）内的高度角变化，用于判断什么时候适合观测：
  *   · 背景色带表示天空状态：白天 / 民用晨昏 / 航海晨昏 / 天文晨昏 / 夜间（同一色相、由亮到暗）；
  *   · 金色曲线为目标高度角，曲线下方淡色填充；地平线以下区域压暗；
- *   · 竖线 + 圆点标出当前观测时刻，并标注上中天（最高点）；
+ *   · 竖线 + 圆点标出当前观测时刻，并标注上中天（最高点）；两处标注互相避让，不会重叠；
  *   · 鼠标/触摸移动时显示十字准线和提示框；键盘 ←/→ 可逐点移动；
  *   · 提供"表格"视图（逐小时列出高度角、方位角、天空状态），便于无障碍阅读。
  *
@@ -35,6 +35,29 @@
     if (sunAlt > -12) return 2;
     if (sunAlt > -18) return 3;
     return 4;
+  }
+
+  /**
+   * SVG 文字所占的矩形区域 {x, y, w, h}。
+   * 优先用 getBBox() 实测；图表还没显示（所在标签页被隐藏）时 getBBox 得到 0 或报错，改按字数估算
+   * （标注字号 11.5px：中文字约 1 em 宽，其他字符约 0.58 em）。
+   */
+  function textBox(t) {
+    try {
+      var b = t.getBBox();
+      if (b.width > 0) return { x: b.x, y: b.y, w: b.width, h: b.height };
+    } catch (e) { /* 未渲染的元素在部分浏览器中 getBBox 会报错 */ }
+    var str = t.textContent || '', w = 0;
+    for (var i = 0; i < str.length; i++) w += /[\u3000-\u9fff\uff00-\uffef]/.test(str[i]) ? 11.5 : 6.7;
+    var x = +t.getAttribute('x'), y = +t.getAttribute('y');
+    var anchor = t.getAttribute('text-anchor') || 'start';
+    if (anchor === 'middle') x -= w / 2;
+    else if (anchor === 'end') x -= w;
+    return { x: x, y: y - 11, w: w, h: 14 };
+  }
+  /** 两个矩形是否相交（pad 为额外留出的间距） */
+  function overlaps(a, b, pad) {
+    return a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
   }
 
   function el(name, attrs, parent) {
@@ -119,6 +142,37 @@
       return geom.y0 + (Y_MAX - a) / (Y_MAX - Y_MIN) * PLOT_H;
     }
 
+    /**
+     * 放置"当前 xx°"标注：在圆点周围依次尝试几个位置，取第一个完全在绘图区内、且不与已有文字重叠的位置。
+     * 首选位置与原来一致：圆点右侧（靠近右边缘时在左侧），偏上（圆点太靠上时偏下）；
+     * 当前时刻接近上中天时，首选位置会压住"中天"标注，这时改放圆点下方、另一侧或更远处。
+     * @param {SVGTextElement} text 已加入 svg 的文字元素
+     * @param {Array} avoid 已放置文字的矩形区域
+     */
+    function placeNowLabel(text, nx, ny, avoid) {
+      var side1 = nx > geom.x0 + geom.w - 70 ? 'end' : 'start';
+      var side2 = side1 === 'end' ? 'start' : 'end';
+      var v = ny < geom.y0 + 24 ? [16, -8] : [-8, 16]; // 基线相对圆点的偏移：负值在上方，正值在下方
+      var cands = [[side1, v[0]], [side1, v[1]], [side2, v[0]], [side2, v[1]],
+        [side1, 30], [side2, 30], [side1, -22], [side2, -22]];
+      var plot = { x: geom.x0, y: geom.y0, w: geom.w, h: yOf(Y_MIN) - geom.y0 };
+      function put(c) {
+        text.setAttribute('text-anchor', c[0]);
+        text.setAttribute('x', nx + (c[0] === 'end' ? -8 : 8));
+        text.setAttribute('y', ny + c[1]);
+      }
+      var fallback = null;
+      for (var i = 0; i < cands.length; i++) {
+        put(cands[i]);
+        var b = textBox(text);
+        var inside = b.x >= plot.x - 1 && b.x + b.w <= plot.x + plot.w + 1 && b.y >= plot.y - 1 && b.y + b.h <= plot.y + plot.h + 1;
+        if (!inside) continue;
+        if (!fallback) fallback = cands[i];
+        if (!avoid.some(function (a) { return overlaps(a, b, 2); })) return;
+      }
+      put(fallback || cands[0]); // 都会重叠时退回第一个在绘图区内的位置
+    }
+
     function draw() {
       if (!model || plotWrap.hidden) return;
       var width = Math.max(260, plotWrap.clientWidth || 360);
@@ -129,6 +183,7 @@
       svg.setAttribute('height', height);
       svg.innerHTML = '';
       var s = model.samples;
+      var placed = []; // 已放置的说明文字区域，"当前"标注要避开它们
 
       // 1) 天空状态色带：把相邻同状态的采样点合并成一个矩形
       var bands = el('g', { class: 'bands' }, svg);
@@ -150,10 +205,15 @@
         for (var q = from; q < to; q++) if (s[q].alt < 3 && s[q].alt > -16) return false;
         return true;
       };
+      var belowNote = null;
       if (clearOf(0, edge)) {
-        el('text', { x: geom.x0 + 6, y: yOf(0) + 14, class: 'note' }, svg).textContent = T('地平线以下');
+        belowNote = el('text', { x: geom.x0 + 6, y: yOf(0) + 14, class: 'note' }, svg);
       } else if (clearOf(s.length - edge, s.length)) {
-        el('text', { x: geom.x0 + geom.w - 6, y: yOf(0) + 14, class: 'note', 'text-anchor': 'end' }, svg).textContent = T('地平线以下');
+        belowNote = el('text', { x: geom.x0 + geom.w - 6, y: yOf(0) + 14, class: 'note', 'text-anchor': 'end' }, svg);
+      }
+      if (belowNote) {
+        belowNote.textContent = T('地平线以下');
+        placed.push(textBox(belowNote));
       }
 
       // 3) 网格线与纵轴刻度（实线细线，保持低调）
@@ -192,23 +252,40 @@
       el('path', { d: area, class: 'area', 'clip-path': 'url(#alt-above-' + uid + ')' }, svg);
       el('path', { d: line, class: 'line', 'clip-path': 'url(#alt-plot-' + uid + ')' }, svg);
 
+      // 当前观测时刻是否在横轴范围内（上中天标注要据此避让"当前"竖线）
+      var nowIn = model.nowJd >= model.jdStart && model.nowJd <= model.jdEnd;
+      var nx = nowIn ? xOf(model.nowJd) : NaN;
+
       // 5) 上中天标注（选择性直接标注：只标最高点）
       if (model.transit && model.transit.jd >= model.jdStart && model.transit.jd <= model.jdEnd) {
         var tx = xOf(model.transit.jd), ty = yOf(model.transit.alt);
         var label = T('中天 {alt}° {time}', { alt: model.transit.alt.toFixed(1), time: model.formatTime(model.transit.jd) });
         var anchor = tx > geom.x0 + geom.w - 90 ? 'end' : tx < geom.x0 + 90 ? 'start' : 'middle';
-        el('text', { x: tx, y: Math.max(geom.y0 + 10, ty - 10), class: 'label', 'text-anchor': anchor }, svg).textContent = label;
+        var tText = el('text', { x: tx, y: Math.max(geom.y0 + 10, ty - 10), class: 'label', 'text-anchor': anchor }, svg);
+        tText.textContent = label;
+        // 当前时刻接近上中天时，"当前"竖线和圆点会穿过这行字：把它挪到竖线一侧
+        // （上中天在竖线左边就放左侧，否则放右侧；放不下时换另一侧），"当前"标注随后会放到另一侧
+        var tb = textBox(tText);
+        if (nowIn && tb.x - 3 < nx + 5 && tb.x + tb.w + 3 > nx - 5) {
+          var sides = tx <= nx ? ['end', 'start'] : ['start', 'end'];
+          for (var si = 0; si < sides.length; si++) {
+            tText.setAttribute('text-anchor', sides[si]);
+            tText.setAttribute('x', nx + (sides[si] === 'end' ? -8 : 8));
+            tb = textBox(tText);
+            if (tb.x >= geom.x0 - 1 && tb.x + tb.w <= geom.x0 + geom.w + 1) break;
+          }
+        }
+        placed.push(tb);
       }
 
       // 6) 当前观测时刻
-      if (model.nowJd >= model.jdStart && model.nowJd <= model.jdEnd) {
-        var nx = xOf(model.nowJd);
+      if (nowIn) {
         el('line', { x1: nx, x2: nx, y1: geom.y0, y2: yOf(Y_MIN), class: 'now' }, svg);
         var ny = yOf(model.nowAlt);
         el('circle', { cx: nx, cy: ny, r: 4.5, class: 'dot' }, svg);
-        var nAnchor = nx > geom.x0 + geom.w - 70 ? 'end' : 'start';
-        el('text', { x: nx + (nAnchor === 'end' ? -8 : 8), y: ny < geom.y0 + 24 ? ny + 16 : ny - 8, class: 'label', 'text-anchor': nAnchor }, svg)
-          .textContent = T('当前 {alt}°', { alt: model.nowAlt.toFixed(1) });
+        var nText = el('text', { class: 'label' }, svg);
+        nText.textContent = T('当前 {alt}°', { alt: model.nowAlt.toFixed(1) });
+        placeNowLabel(nText, nx, ny, placed);
       }
 
       // 7) 悬停层：十字准线
