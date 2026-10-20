@@ -198,9 +198,13 @@
     var p = zonedParts(date, tz);
     return pad(p.h) + ':' + pad(p.mi) + ':' + pad(p.s);
   }
+  /** 时:分。先四舍五入到整分钟——直接取"时:分"会把秒舍掉，显示的时刻最多会早 59 秒 */
   function fmtHM(date, tz) {
-    var p = zonedParts(date, tz);
+    var p = zonedParts(roundMinute(date), tz);
     return pad(p.h) + ':' + pad(p.mi);
+  }
+  function roundMinute(date) {
+    return new Date(Math.round(date.getTime() / 60000) * 60000);
   }
   /** 时区下拉列表的选项：本机时区、UTC 排在最前，其余按名称排序 */
   function timeZoneList() {
@@ -1365,16 +1369,23 @@
     var refrMax = settings.refraction ? Astro.refraction(rts.maxAlt, press) : 0;
     var refrMin = settings.refraction ? Astro.refraction(rts.minAlt, press) : 0;
     function when(jd) {
-      var d = Astro.dateFromJd(jd);
+      // 先四舍五入到分钟，再判断是否当日（否则 23:59:40 会显示成 00:00 却标"当日"）
+      var d = roundMinute(Astro.dateFromJd(jd));
       var q = zonedParts(d, settings.tz);
       var sameDay = q.y === p.y && q.mo === p.mo && q.d === p.d;
       return { time: fmtHM(d, settings.tz), note: sameDay ? '当日' : (q.mo + '月' + q.d + '日') };
     }
     var t = {}; // 引用键 → 显示文字
+    // 高度角、方位角的小数位随"显示精度"变化：低 3 位（约 3.6″）、标准 4 位（约 0.36″）、高 5 位
+    var hd = prec()[1] + 3;
+    // 方位角紧挨正北时，舍入后可能变成 360，统一显示为 0
+    var azDec = o.az.toFixed(hd), azDms = fLon(o.az);
+    if (+azDec >= 360) azDec = (0).toFixed(hd);
+    if (/^360/.test(azDms)) azDms = fLon(0);
     t.altLabel = '高度角' + (settings.refraction ? '（含折射）' : '');
-    t.alt = (o.alt >= 0 ? '+' : '') + o.alt.toFixed(2) + '°';
+    t.alt = (o.alt >= 0 ? '+' : '') + o.alt.toFixed(hd) + '°';
     t.altState = o.alt > 0 ? '地平线以上' : '地平线以下';
-    t.az = o.az.toFixed(2) + '°';
+    t.az = azDec + '°';
     t.azDir = compass8(o.az);
     var tr = when(rts.transit);
     var kind = rts.circumpolar ? 'circ' : rts.neverRises ? 'never' : 'normal';
@@ -1391,17 +1402,20 @@
       t.set = set.time;
       t.setNote = set.note;
     }
-    // 详细数值：[标签, 文字, 复制文字, 强调, 引用键]
+    // 详细数值：[标签, 文字, 复制文字, 强调, 引用键]；精度都随"显示精度"变化
+    var sd = prec()[0]; // 恒星时秒的小数位，与赤经一致
     var rows = [
-      ['时角 HA', fHMSsigned(o.ha, 0) + (o.ha < 0 ? '（东侧，尚未中天）' : '（西侧，已过中天）'), fHMSsigned(o.ha, 1), false, 'ha'],
-      ['地方视恒星时', Angle.formatHMS(o.last, 1), Angle.formatHMS(o.last, 1), false, 'last'],
-      ['地方平恒星时', Angle.formatHMS(o.lmst, 1), Angle.formatHMS(o.lmst, 1), false, 'lmst'],
-      ['格林尼治视恒星时', Angle.formatHMS(o.gast, 1), Angle.formatHMS(o.gast, 1), false, 'gast'],
-      ['格林尼治平恒星时', Angle.formatHMS(o.gmst, 1), Angle.formatHMS(o.gmst, 1), false, 'gmst'],
+      ['高度角 度分秒', fDec(o.alt), fDec(o.alt), false, 'altDms'],
+      ['方位角 度分秒', azDms, azDms, false, 'azDms'],
+      ['时角 HA', fHMSsigned(o.ha) + (o.ha < 0 ? '（东侧，尚未中天）' : '（西侧，已过中天）'), fHMSsigned(o.ha), false, 'ha'],
+      ['地方视恒星时', Angle.formatHMS(o.last, sd), Angle.formatHMS(o.last, sd), false, 'last'],
+      ['地方平恒星时', Angle.formatHMS(o.lmst, sd), Angle.formatHMS(o.lmst, sd), false, 'lmst'],
+      ['格林尼治视恒星时', Angle.formatHMS(o.gast, sd), Angle.formatHMS(o.gast, sd), false, 'gast'],
+      ['格林尼治平恒星时', Angle.formatHMS(o.gmst, sd), Angle.formatHMS(o.gmst, sd), false, 'gmst'],
       ['视赤经、视赤纬', fRA(o.raApp) + '  ' + fDec(o.decApp), fRA(o.raApp) + ' ' + fDec(o.decApp), false, 'app'],
       ['大气质量', o.airmass ? o.airmass.toFixed(3) : '—（地平线以下）', o.airmass ? o.airmass.toFixed(3) : '', false, 'airmass'],
       ['大气折射', settings.refraction ? (o.refraction > 0 ? '+' + (o.refraction * 60).toFixed(2) + '′' : '0（地平线以下不计）') : '未计入', false, false, 'refr'],
-      ['星位角 q', Angle.formatDecimal(o.parallactic, 2, true) + '°', Angle.formatDecimal(o.parallactic, 2, true), false, 'pa']
+      ['星位角 q', Angle.formatDecimal(o.parallactic, hd - 1, true) + '°', Angle.formatDecimal(o.parallactic, hd - 1, true), false, 'pa']
     ];
     return { date: date, o: o, rts: rts, kind: kind, t: t, rows: rows, up: o.alt > 0 };
   }
@@ -1545,7 +1559,9 @@
     var rows = [
       ['角距离（度）', Angle.formatDecimal(sep, 6) + '°', Angle.formatDecimal(sep, 6)],
       ['角距离（角分）', Angle.formatDecimal(sep * 60, 4) + '′', Angle.formatDecimal(sep * 60, 4)],
-      ['角距离（角秒）', Angle.formatDecimal(sep * 3600, 3) + '″', Angle.formatDecimal(sep * 3600, 3)]
+      ['角距离（角秒）', Angle.formatDecimal(sep * 3600, 3) + '″', Angle.formatDecimal(sep * 3600, 3)],
+      // 位置角卡片只显示 2 位小数，这里给出随"显示精度"变化的完整数值
+      ['位置角 PA', Angle.formatDecimal(pa, prec()[1] + 3) + '°', Angle.formatDecimal(pa, prec()[1] + 3)]
     ];
     // 小角度（望远镜视场量级）时给出切平面偏移：以 A 为切点的标准坐标，ξ 向东、η 向北；
     // 角距离较大时切平面投影失真严重，不再显示
@@ -1684,7 +1700,7 @@
     name.textContent = A.name || '自定义坐标';
     coord.textContent = 'α ' + Angle.formatHMS(A.icrs.ra / 15, 1) + '  δ ' + Angle.formatDMS(A.icrs.dec, 0);
     var o = obs || Astro.observe(A.v, obsDate(), settings.site, { refraction: settings.refraction });
-    meta.textContent = 'J2000 · ' + (con ? constellationName(con) : '') + ' · 高度 ' + (o.alt >= 0 ? '+' : '') + o.alt.toFixed(1) + '° · 方位 ' + o.az.toFixed(0) + '°';
+    meta.textContent = 'J2000 · ' + (con ? constellationName(con) : '') + ' · 高度 ' + (o.alt >= 0 ? '+' : '') + o.alt.toFixed(1) + '° · 方位 ' + (Math.round(o.az) % 360) + '°';
     badge.hidden = false;
     badge.textContent = (A.name ? A.name + ' · ' : '') + (con ? constellationName(con) : '');
   }
