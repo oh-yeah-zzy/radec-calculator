@@ -8,6 +8,8 @@
   <meta name="theme-color" content="#04060d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230a1230'/%3E%3Cellipse cx='32' cy='32' rx='26' ry='9' fill='none' stroke='%23f2c46d' stroke-width='2.5' transform='rotate(-24 32 32)'/%3E%3Cpath d='M32 14l3.2 9.6 10 .1-8 6 3 9.7-8.2-5.8-8.2 5.8 3-9.7-8-6 10-.1z' fill='%23ffe3a3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
+  <!-- 界面语言（中文 / English）：需在页面内容之前加载，英文界面在翻译完成前先隐藏页面 -->
+  <script src="js/i18n.js"></script>
 </head>
 <body>
   <!-- ============ 背景星图（由 js/starmap.js 绘制） ============ -->
@@ -75,6 +77,8 @@
         <div class="clock__item"><span class="clock__k">地方恒星时</span><span class="clock__v" id="clock-lst">--:--:--</span></div>
       </div>
       <div class="topbar__actions">
+        <!-- 语言切换：文字与提示由 app.js 按当前语言设置 -->
+        <button type="button" class="icon-btn icon-btn--text" id="btn-lang" lang="en" title="Switch to English">EN</button>
         <button type="button" class="icon-btn" id="btn-night" aria-pressed="false" title="红光夜视模式（保护暗适应）">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
           <span class="sr-only">红光夜视模式</span>

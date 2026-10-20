@@ -2,6 +2,7 @@
  * app.js —— 页面交互逻辑：把各个模块串起来
  *
  * 依赖（按加载顺序）：
+ *   js/i18n.js          RaDec.I18n：界面语言（中文 / English），在 <head> 中最先加载
  *   data/*.js           RaDecData：星表、星座、银河、常用天体
  *   js/angle.js         RaDec.Angle：坐标文本解析与格式化
  *   js/astro.js         RaDec.Astro：天文计算
@@ -26,6 +27,10 @@
   var Angle = RaDec.Angle;
   var Astro = RaDec.Astro;
   var Data = globalThis.RaDecData;
+  // 界面语言（js/i18n.js）：T('中文', {参数}) 取当前语言的文字；paren() 生成括号注释（中文全角、英文半角）
+  var I18n = RaDec.I18n;
+  var T = I18n.t;
+  var paren = I18n.paren;
 
   /* =====================================================================
    * 一、通用工具
@@ -114,10 +119,10 @@
       var ok = false;
       try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
       document.body.removeChild(ta);
-      toast(ok ? '已复制：' + text : '复制失败，请手动选择文本复制');
+      toast(ok ? T('已复制：{text}', { text: text }) : T('复制失败，请手动选择文本复制'));
     }
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(function () { toast('已复制：' + text); }, fallback);
+      navigator.clipboard.writeText(text).then(function () { toast(T('已复制：{text}', { text: text })); }, fallback);
     } else {
       fallback();
     }
@@ -226,28 +231,49 @@
    * 三、设置与状态
    * ===================================================================== */
 
-  // 预设观测地点（坐标为近似值，可在输入框中手动修改）；tz 为当地时区，选择预设地点时会自动切换
+  // 预设观测地点（坐标为近似值，可在输入框中手动修改）；tz 为当地时区，选择预设地点时会自动切换。
+  // name 为中文名（同时用作保存设置时的标识，保持与旧版本兼容），en 为英文界面显示的名称
   var SITES = [
-    { name: '北京', lat: 39.9042, lon: 116.4074, elev: 44, tz: 'Asia/Shanghai' },
-    { name: '上海', lat: 31.2304, lon: 121.4737, elev: 4, tz: 'Asia/Shanghai' },
-    { name: '广州', lat: 23.1291, lon: 113.2644, elev: 21, tz: 'Asia/Shanghai' },
-    { name: '成都', lat: 30.5728, lon: 104.0668, elev: 500, tz: 'Asia/Shanghai' },
-    { name: '西安', lat: 34.3416, lon: 108.9398, elev: 400, tz: 'Asia/Shanghai' },
-    { name: '乌鲁木齐', lat: 43.8256, lon: 87.6168, elev: 800, tz: 'Asia/Shanghai' },
-    { name: '拉萨', lat: 29.6525, lon: 91.1721, elev: 3656, tz: 'Asia/Shanghai' },
-    { name: '香港', lat: 22.3193, lon: 114.1694, elev: 30, tz: 'Asia/Hong_Kong' },
-    { name: '台北', lat: 25.0330, lon: 121.5654, elev: 10, tz: 'Asia/Taipei' },
-    { name: '兴隆观测基地（河北）', lat: 40.3942, lon: 117.5750, elev: 960, tz: 'Asia/Shanghai' },
-    { name: '丽江高美古观测站（云南）', lat: 26.6951, lon: 100.0300, elev: 3200, tz: 'Asia/Shanghai' },
-    { name: '冷湖赛什腾山（青海）', lat: 38.6068, lon: 93.8961, elev: 4200, tz: 'Asia/Shanghai' },
-    { name: '格林尼治（伦敦）', lat: 51.4769, lon: -0.0005, elev: 46, tz: 'Europe/London' },
-    { name: '莫纳克亚（夏威夷）', lat: 19.8207, lon: -155.4681, elev: 4205, tz: 'Pacific/Honolulu' },
-    { name: '帕拉纳尔（智利）', lat: -24.6275, lon: -70.4044, elev: 2635, tz: 'America/Santiago' },
-    { name: '悉尼', lat: -33.8688, lon: 151.2093, elev: 58, tz: 'Australia/Sydney' }
+    { name: '北京', en: 'Beijing', lat: 39.9042, lon: 116.4074, elev: 44, tz: 'Asia/Shanghai' },
+    { name: '上海', en: 'Shanghai', lat: 31.2304, lon: 121.4737, elev: 4, tz: 'Asia/Shanghai' },
+    { name: '广州', en: 'Guangzhou', lat: 23.1291, lon: 113.2644, elev: 21, tz: 'Asia/Shanghai' },
+    { name: '成都', en: 'Chengdu', lat: 30.5728, lon: 104.0668, elev: 500, tz: 'Asia/Shanghai' },
+    { name: '西安', en: "Xi'an", lat: 34.3416, lon: 108.9398, elev: 400, tz: 'Asia/Shanghai' },
+    { name: '乌鲁木齐', en: 'Urumqi', lat: 43.8256, lon: 87.6168, elev: 800, tz: 'Asia/Shanghai' },
+    { name: '拉萨', en: 'Lhasa', lat: 29.6525, lon: 91.1721, elev: 3656, tz: 'Asia/Shanghai' },
+    { name: '香港', en: 'Hong Kong', lat: 22.3193, lon: 114.1694, elev: 30, tz: 'Asia/Hong_Kong' },
+    { name: '台北', en: 'Taipei', lat: 25.0330, lon: 121.5654, elev: 10, tz: 'Asia/Taipei' },
+    { name: '兴隆观测基地（河北）', en: 'Xinglong Observatory (Hebei)', lat: 40.3942, lon: 117.5750, elev: 960, tz: 'Asia/Shanghai' },
+    { name: '丽江高美古观测站（云南）', en: 'Lijiang Gaomeigu Observatory (Yunnan)', lat: 26.6951, lon: 100.0300, elev: 3200, tz: 'Asia/Shanghai' },
+    { name: '冷湖赛什腾山（青海）', en: 'Lenghu, Saishiteng Mountain (Qinghai)', lat: 38.6068, lon: 93.8961, elev: 4200, tz: 'Asia/Shanghai' },
+    // 美国：城市在前，这样按本机时区选默认地点时优先选中城市
+    { name: '纽约', en: 'New York', lat: 40.7128, lon: -74.0060, elev: 10, tz: 'America/New_York' },
+    { name: '芝加哥', en: 'Chicago', lat: 41.8781, lon: -87.6298, elev: 181, tz: 'America/Chicago' },
+    { name: '丹佛', en: 'Denver', lat: 39.7392, lon: -104.9903, elev: 1609, tz: 'America/Denver' },
+    { name: '菲尼克斯', en: 'Phoenix', lat: 33.4484, lon: -112.0740, elev: 331, tz: 'America/Phoenix' },
+    { name: '洛杉矶', en: 'Los Angeles', lat: 34.0522, lon: -118.2437, elev: 89, tz: 'America/Los_Angeles' },
+    { name: '基特峰国家天文台（亚利桑那）', en: 'Kitt Peak National Observatory (Arizona)', lat: 31.9583, lon: -111.5967, elev: 2096, tz: 'America/Phoenix' },
+    { name: '帕洛玛天文台（加利福尼亚）', en: 'Palomar Observatory (California)', lat: 33.3564, lon: -116.8650, elev: 1712, tz: 'America/Los_Angeles' },
+    { name: '麦克唐纳天文台（得克萨斯）', en: 'McDonald Observatory (Texas)', lat: 30.6714, lon: -104.0225, elev: 2070, tz: 'America/Chicago' },
+    { name: '格林尼治（伦敦）', en: 'Greenwich (London)', lat: 51.4769, lon: -0.0005, elev: 46, tz: 'Europe/London' },
+    { name: '莫纳克亚（夏威夷）', en: 'Mauna Kea (Hawaii)', lat: 19.8207, lon: -155.4681, elev: 4205, tz: 'Pacific/Honolulu' },
+    { name: '帕拉纳尔（智利）', en: 'Paranal (Chile)', lat: -24.6275, lon: -70.4044, elev: 2635, tz: 'America/Santiago' },
+    { name: '悉尼', en: 'Sydney', lat: -33.8688, lon: 151.2093, elev: 58, tz: 'Australia/Sydney' }
   ];
 
-  // 首次打开时：默认地点取与本机时区相同的预设地点（例如本机为北京时间 → 北京），找不到则用北京
-  var defaultSite = SITES.filter(function (s) { return s.tz === browserTz; })[0] || SITES[0];
+  // 首次打开时的默认地点：与本机时区相同的预设地点（例如本机为北京时间 → 北京）；
+  // 没有时取当前 UTC 偏移相同的预设地点（例如 America/Detroit → 纽约）；都没有则中文界面用北京、英文界面用格林尼治
+  var defaultSite = SITES.filter(function (s) { return s.tz === browserTz; })[0] || (function () {
+    var now = new Date(), off = tzOffsetMin(now, browserTz);
+    return SITES.filter(function (s) { return tzOffsetMin(now, s.tz) === off; })[0];
+  })() || SITES.filter(function (s) { return I18n.isEn && s.tz === 'Europe/London'; })[0] || SITES[0];
+
+  /** 地点的显示名称：预设地点按当前语言显示，"自定义""当前位置"也翻译 */
+  function siteName(s) {
+    var p = SITES.filter(function (x) { return x.name === s.name && x.lat === s.lat && x.lon === s.lon; })[0];
+    if (p) return I18n.isEn ? p.en : p.name;
+    return T(s.name);
+  }
 
   var DEFAULTS = {
     site: defaultSite,
@@ -320,9 +346,10 @@
     if (+s.toFixed(d) >= 60) { m += 1; s = 0; }
     return sign + (m ? m + '′ ' : '') + s.toFixed(d) + '″';
   }
-  /** 方位 → 八方位中文名 */
+  /** 方位 → 八方位名（中文界面"北 N"，英文界面"N"） */
   function compass8(az) {
-    var names = ['北 N', '东北 NE', '东 E', '东南 SE', '南 S', '西南 SW', '西 W', '西北 NW'];
+    var names = I18n.isEn ? ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+      : ['北 N', '东北 NE', '东 E', '东南 SE', '南 S', '西南 SW', '西 W', '西北 NW'];
     return names[Math.round((((az % 360) + 360) % 360) / 45) % 8];
   }
 
@@ -333,7 +360,29 @@
   });
   function constellationName(ab) {
     var c = CON_BY_AB[ab];
-    return c ? c.zh : ab;
+    return c ? (I18n.isEn ? c.la : c.zh) : ab; // 英文界面用拉丁名，例如 Andromeda
+  }
+
+  /** 常用天体的显示名称与副标题（中文界面：中文名 + 英文名；英文界面：英文名 + 第一个非中文别名，如 M31、α CMa） */
+  function objName(o) {
+    return I18n.isEn ? o.en : o.zh;
+  }
+  function objSub(o) {
+    if (!I18n.isEn) return o.en;
+    var alias = (o.alias || []).filter(function (a) { return !/[\u4e00-\u9fff]/.test(a) && a !== o.en; });
+    return alias[0] || '';
+  }
+  /** 星表恒星的显示名称：优先当前语言的星名，再退到拜耳/弗兰斯蒂德名、HIP 编号；都没有时显示"恒星" */
+  function starLabel(s) {
+    return (I18n.isEn ? s.en : (s.zh || s.en)) || s.desig || (s.hip ? 'HIP ' + s.hip : T('恒星'));
+  }
+
+  /** 坐标解析错误的提示（按当前语言重新生成，参数中的分量名称如"赤纬"也一并翻译） */
+  function errText(e) {
+    if (!(e instanceof Angle.ParseError) || !e.key) return e.message;
+    var p = e.params ? Object.assign({}, e.params) : null;
+    if (p && p.label) p.label = T(p.label);
+    return T(e.key, p);
   }
 
   /* =====================================================================
@@ -341,11 +390,11 @@
    * ===================================================================== */
 
   var EPOCH_OPTIONS = [
-    ['J2000', 'J2000.0（ICRS）'],
-    ['B1950', 'B1950.0（FK4）'],
-    ['obs', '观测时刻（JNow）'],
-    ['date', '指定日期…'],
-    ['jepoch', '儒略历元…']
+    ['J2000', 'J2000.0' + paren('ICRS')],
+    ['B1950', 'B1950.0' + paren('FK4')],
+    ['obs', T('观测时刻（JNow）')],
+    ['date', T('指定日期…')],
+    ['jepoch', T('儒略历元…')]
   ];
 
   /**
@@ -355,15 +404,15 @@
   function createEpochPicker(container, opts) {
     opts = opts || {};
     var nm = opts.name || 'epoch';
-    var sel = h('select', { name: nm + '-mode', id: nm + '-mode', 'aria-label': opts.label || '历元' });
+    var sel = h('select', { name: nm + '-mode', id: nm + '-mode', 'aria-label': opts.label || T('历元') });
     EPOCH_OPTIONS.forEach(function (o) { sel.appendChild(h('option', { value: o[0], text: o[1] })); });
-    var dateIn = h('input', { type: 'datetime-local', name: nm + '-date', step: '1', 'aria-label': '历元对应的日期时间（所选时区）', hidden: true });
-    var numIn = h('input', { type: 'number', name: nm + '-jepoch', step: '0.1', inputmode: 'decimal', placeholder: '2050.0', 'aria-label': '儒略历元，例如 2050.0', hidden: true });
+    var dateIn = h('input', { type: 'datetime-local', name: nm + '-date', step: '1', 'aria-label': T('历元对应的日期时间（所选时区）'), hidden: true });
+    var numIn = h('input', { type: 'number', name: nm + '-jepoch', step: '0.1', inputmode: 'decimal', placeholder: '2050.0', 'aria-label': T('儒略历元，例如 2050.0'), hidden: true });
     var appCb = h('input', { type: 'checkbox', name: nm + '-apparent' });
-    var appWrap = h('label', { class: 'check', hidden: true, title: '勾选表示输入的是该时刻的视位置（例如赤道仪/望远镜显示的 JNow 坐标），未勾选表示平位置' },
-      [appCb, h('span', { text: '视位置' })]);
+    var appWrap = h('label', { class: 'check', hidden: true, title: T('勾选表示输入的是该时刻的视位置（例如赤道仪/望远镜显示的 JNow 坐标），未勾选表示平位置') },
+      [appCb, h('span', { text: T('视位置') })]);
     var note = h('div', { class: 'epoch__note', hidden: true });
-    var wrap = h('div', { class: 'epoch' }, [h('span', { class: 'epoch__label', text: opts.label || '历元' }), sel, dateIn, numIn, appWrap, note]);
+    var wrap = h('div', { class: 'epoch' }, [h('span', { class: 'epoch__label', text: opts.label || T('历元') }), sel, dateIn, numIn, appWrap, note]);
     container.appendChild(wrap);
 
     sel.value = opts.defaultMode || 'J2000';
@@ -392,23 +441,24 @@
       resolve: function () {
         var m = sel.value;
         if (m === 'J2000') return { ok: true, epoch: { kind: 'J2000' }, label: 'J2000.0', jdTT: Astro.J2000 };
-        if (m === 'B1950') return { ok: true, epoch: { kind: 'B1950' }, label: 'B1950.0（FK4）', jdTT: Astro.JD_B1950, fk4: true };
+        if (m === 'B1950') return { ok: true, epoch: { kind: 'B1950' }, label: 'B1950.0' + paren('FK4'), jdTT: Astro.JD_B1950, fk4: true };
         var jdTT, label, date = null;
         if (m === 'obs' || m === 'date') {
           date = m === 'obs' ? obsDate() : parseLocalInput(dateIn.value, settings.tz);
-          if (!date || isNaN(date.getTime())) return { ok: false, error: '请填写有效的日期时间' };
+          if (!date || isNaN(date.getTime())) return { ok: false, error: T('请填写有效的日期时间') };
           jdTT = Astro.jdTTFromUtc(Astro.jdFromDate(date));
-          label = (m === 'obs' ? '观测时刻 ' : '') + fmtDateTime(date, settings.tz) + '（J' + Astro.julianEpoch(jdTT).toFixed(3) + '）';
+          var dt = fmtDateTime(date, settings.tz);
+          label = (m === 'obs' ? T('观测时刻 {date}', { date: dt }) : dt) + paren('J' + Astro.julianEpoch(jdTT).toFixed(3));
         } else {
           var ep = parseFloat(numIn.value);
-          if (!isFinite(ep) || ep < -4000 || ep > 8000) return { ok: false, error: '请输入有效的儒略历元，例如 2050.0' };
+          if (!isFinite(ep) || ep < -4000 || ep > 8000) return { ok: false, error: T('请输入有效的儒略历元，例如 2050.0') };
           jdTT = Astro.jdFromJulianEpoch(ep);
           date = Astro.dateFromJd(jdTT);
           label = 'J' + (Math.round(ep * 10) === ep * 10 ? ep.toFixed(1) : String(ep));
         }
         var apparent = !!(opts.allowApparent && appCb.checked);
         return {
-          ok: true, epoch: { kind: 'jd', jdTT: jdTT, apparent: apparent }, label: label + (apparent ? ' · 视位置' : ''),
+          ok: true, epoch: { kind: 'jd', jdTT: jdTT, apparent: apparent }, label: label + (apparent ? ' · ' + T('视位置') : ''),
           jdTT: jdTT, date: date, timeDependent: m === 'obs'
         };
       },
@@ -477,7 +527,7 @@
       // 1) 常用天体
       (Data.objects || []).forEach(function (o) {
         entries.push({
-          label: o.zh, sub: o.en, type: o.type, mag: o.mag, ra: o.ra, dec: o.dec, priority: 2,
+          label: objName(o), sub: objSub(o), type: o.type, mag: o.mag, ra: o.ra, dec: o.dec, priority: 2,
           keys: [o.zh, o.en, o.id].concat(o.alias || []).map(norm)
         });
       });
@@ -504,8 +554,9 @@
             return;
           }
         }
-        var label = s.zh || s.en || s.desig || ('HIP ' + s.hip);
-        var sub = [s.zh ? s.en : '', s.desig, s.hip ? 'HIP ' + s.hip : ''].filter(Boolean).join(' · ');
+        var label = starLabel(s);
+        var sub = (I18n.isEn ? [s.en ? s.desig : '', s.hip ? 'HIP ' + s.hip : '']
+          : [s.zh ? s.en : '', s.desig, s.hip ? 'HIP ' + s.hip : '']).filter(Boolean).join(' · ');
         entries.push({ label: label, sub: sub, type: '恒星', mag: s.mag, ra: s.ra, dec: s.dec, priority: 1, keys: keys });
       });
     }
@@ -541,12 +592,12 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.text();
         }, function (err) {
-          throw new Error(err && err.name === 'AbortError' ? '在线查询超时，请检查网络连接' : '在线查询失败：需要联网访问 cds.unistra.fr');
+          throw new Error(err && err.name === 'AbortError' ? T('在线查询超时，请检查网络连接') : T('在线查询失败：需要联网访问 cds.unistra.fr'));
         })
         .then(function (text) {
           clearTimeout(timer);
           var m = /^%J\s+([\d.]+)\s+([+-]?[\d.]+)/m.exec(text);
-          if (!m) throw new Error('SIMBAD 中没有找到“' + name + '”');
+          if (!m) throw new Error(T('SIMBAD 中没有找到“{name}”', { name: name }));
           var id = /^%I\.0\s+(.+)$/m.exec(text);
           var main = id ? id[1].trim().replace(/\s+/g, ' ').replace(/^NAME /, '') : name;
           return { ra: +m[1], dec: +m[2], name: main };
@@ -564,13 +615,13 @@
    * ===================================================================== */
 
   var SYS_TEXT = {
-    equatorial: { a: '赤经 α', b: '赤纬 δ', pa: '05h34m31.9s · 5:34:31.9 · 83.633', pb: '+22°00′52″ · +22 00 52 · 22.0145', name: '赤道坐标' },
-    galactic: { a: '银经 l', b: '银纬 b', pa: '184.5575 · 184°33′27″', pb: '-5.7843 · -05°47′03″', name: '银道坐标' },
-    ecliptic: { a: '黄经 λ', b: '黄纬 β', pa: '84.0974 · 84°05′51″', pb: '-1.2944 · -01°17′40″', name: '黄道坐标' },
+    equatorial: { a: T('赤经 α'), b: T('赤纬 δ'), pa: '05h34m31.9s · 5:34:31.9 · 83.633', pb: '+22°00′52″ · +22 00 52 · 22.0145', name: T('赤道坐标') },
+    galactic: { a: T('银经 l'), b: T('银纬 b'), pa: '184.5575 · 184°33′27″', pb: '-5.7843 · -05°47′03″', name: T('银道坐标') },
+    ecliptic: { a: T('黄经 λ'), b: T('黄纬 β'), pa: '84.0974 · 84°05′51″', pb: '-1.2944 · -01°17′40″', name: T('黄道坐标') },
     // 地平坐标：按"观测时间与地点"反算赤经赤纬（方位角从正北起算、向东为正）
-    horizontal: { a: '方位角 A', b: '高度角 h', pa: '135.5 · 135°30′', pb: '+45.2 · +45°12′', name: '地平坐标' }
+    horizontal: { a: T('方位角 A'), b: T('高度角 h'), pa: '135.5 · 135°30′', pb: '+45.2 · +45°12′', name: T('地平坐标') }
   };
-  // 经度类、纬度类分量的名称（用于解析出错时的提示）
+  // 经度类、纬度类分量的名称（用于解析出错时的提示；保持中文，显示时由 errText() 翻译）
   var SYS_PARTS = { galactic: ['银经', '银纬'], ecliptic: ['黄经', '黄纬'], horizontal: ['方位角', '高度角'] };
 
   /**
@@ -676,8 +727,9 @@
     }
     /** 地平坐标输入框下方的说明：方位角的起算方向，以及换算所用的时间、地点 */
     function updateHzNote() {
-      var text = '方位角从正北起算、向东为正（东 90°、南 180°、西 270°）。按下方“观测时间与地点”换算：' + obsLabel() +
-        (settings.refraction ? '；高度角视为含大气折射的观测值。' : '；不计大气折射。');
+      var text = T(settings.refraction
+        ? '方位角从正北起算、向东为正（东 90°、南 180°、西 270°）。按下方“观测时间与地点”换算：{obs}；高度角视为含大气折射的观测值。'
+        : '方位角从正北起算、向东为正（东 90°、南 180°、西 270°）。按下方“观测时间与地点”换算：{obs}；不计大气折射。', { obs: obsLabel() });
       if (hzNote.textContent !== text) hzNote.textContent = text;
     }
     function setFieldState(field, hint, text, err, okText) {
@@ -695,15 +747,16 @@
       try {
         if (ta) pa = parseFirst(ta);
       } catch (e) {
-        ea = e instanceof Angle.ParseError ? e.message : '无法解析';
+        ea = e instanceof Angle.ParseError ? errText(e) : T('无法解析');
       }
       try {
         if (tb) pb = parseSecond(tb);
       } catch (e) {
-        eb = e instanceof Angle.ParseError ? e.message : '无法解析';
+        eb = e instanceof Angle.ParseError ? errText(e) : T('无法解析');
       }
-      setFieldState(fieldA, hintA, ta, ea, pa && ('识别为' + pa.desc + (sys === 'equatorial' && pa.desc !== '十进制度' ? ' = ' + Angle.formatDecimal(pa.deg, 4) + '°' : '')));
-      setFieldState(fieldB, hintB, tb, eb, pb && ('识别为' + pb.desc));
+      // pa.desc 是中文描述（如"十进制度"），显示时再翻译
+      setFieldState(fieldA, hintA, ta, ea, pa && (T('识别为{desc}', { desc: T(pa.desc) }) + (sys === 'equatorial' && pa.desc !== '十进制度' ? ' = ' + Angle.formatDecimal(pa.deg, 4) + '°' : '')));
+      setFieldState(fieldB, hintB, tb, eb, pb && T('识别为{desc}', { desc: T(pb.desc) }));
       var ep;
       if (sys === 'galactic') {
         ep = { ok: true, epoch: null, label: '' };
@@ -752,7 +805,7 @@
       }
       inA.value = pretty(pair[0]);
       inB.value = pretty(pair[1]);
-      if (viaPaste) toast('已自动拆分为两部分');
+      if (viaPaste) toast(T('已自动拆分为两部分'));
       return true;
     }
     [inA, inB].forEach(function (inp) {
@@ -797,13 +850,13 @@
         var li;
         if (r.online) {
           li = h('li', { class: 'search__item search__item--online', role: 'option', id: opts.id + '-opt-' + i }, [
-            h('div', { class: 'search__main' }, [h('span', { class: 'search__name', text: busy ? '正在查询 SIMBAD…' : '在线查询“' + r.query + '”' }),
+            h('div', { class: 'search__main' }, [h('span', { class: 'search__name', text: busy ? T('正在查询 SIMBAD…') : T('在线查询“{q}”', { q: r.query }) }),
               h('span', { class: 'search__alt', text: 'SIMBAD / NED' })])
           ]);
         } else {
           li = h('li', { class: 'search__item', role: 'option', id: opts.id + '-opt-' + i }, [
             h('div', { class: 'search__main' }, [h('span', { class: 'search__name', text: r.label }), r.sub ? h('span', { class: 'search__alt', text: r.sub }) : null]),
-            h('span', { class: 'search__meta', text: r.type + (r.mag != null ? ' ' + r.mag.toFixed(1) + ' 等' : '') })
+            h('span', { class: 'search__meta', text: r.mag != null ? T('{type} {mag} 等', { type: T(r.type), mag: r.mag.toFixed(1) }) : T(r.type) })
           ]);
         }
         li.setAttribute('aria-selected', i === active ? 'true' : 'false');
@@ -848,7 +901,7 @@
         closeList();
         search.value = '';
         setEquatorialJ2000(res.ra, res.dec, res.name);
-        toast('已从 SIMBAD 获取：' + res.name);
+        toast(T('已从 SIMBAD 获取：{name}', { name: res.name }));
       }, function (err) {
         busy = false;
         renderList();
@@ -952,8 +1005,8 @@
     var tzSel = $('#obs-tz');
     var now = new Date();
     timeZoneList().forEach(function (tz, i) {
-      var label = tz + '（' + fmtOffset(tzOffsetMin(now, tz)) + '）';
-      if (i === 0) label = '本机时区 · ' + label;
+      var label = tz + paren(fmtOffset(tzOffsetMin(now, tz)));
+      if (i === 0) label = T('本机时区 · {label}', { label: label });
       tzSel.appendChild(h('option', { value: tz, text: label }));
     });
     if (!tzSel.querySelector('option[value="' + settings.tz + '"]')) settings.tz = browserTz;
@@ -967,8 +1020,8 @@
 
     // ---- 地点 ----
     var siteSel = $('#obs-site');
-    SITES.forEach(function (s, i) { siteSel.appendChild(h('option', { value: String(i), text: s.name })); });
-    siteSel.appendChild(h('option', { value: 'custom', text: '自定义坐标' }));
+    SITES.forEach(function (s, i) { siteSel.appendChild(h('option', { value: String(i), text: siteName(s) })); });
+    siteSel.appendChild(h('option', { value: 'custom', text: T('自定义坐标') }));
     var latIn = $('#obs-lat'), lonIn = $('#obs-lon'), elevIn = $('#obs-elev');
 
     function showSite() {
@@ -990,13 +1043,13 @@
       // 预设地点自带时区：自动切换，使升落时刻、曲线横轴都显示为当地时间
       var siteTz = settings.site.tz;
       if (siteTz && isValidTz(siteTz) && !tzSel.querySelector('option[value="' + siteTz + '"]')) {
-        tzSel.appendChild(h('option', { value: siteTz, text: siteTz + '（' + fmtOffset(tzOffsetMin(new Date(), siteTz)) + '）' }));
+        tzSel.appendChild(h('option', { value: siteTz, text: siteTz + paren(fmtOffset(tzOffsetMin(new Date(), siteTz))) }));
       }
       if (siteTz && siteTz !== settings.tz && tzSel.querySelector('option[value="' + siteTz + '"]')) {
         settings.tz = siteTz;
         tzSel.value = siteTz;
         if (timeState.mode === 'custom') timeInput.value = toLocalInput(timeState.custom, settings.tz);
-        toast('时区已切换为当地时间：' + siteTz + '（' + fmtOffset(tzOffsetMin(new Date(), siteTz)) + '）');
+        toast(T('时区已切换为当地时间：{tz}（{off}）', { tz: siteTz, off: fmtOffset(tzOffsetMin(new Date(), siteTz)) }));
       }
       saveSettings();
       showSite();
@@ -1010,7 +1063,7 @@
         latIn.closest('.field').classList.remove('is-error');
       } catch (e) {
         ok = false;
-        $('#obs-lat-hint').textContent = e.message;
+        $('#obs-lat-hint').textContent = errText(e);
         latIn.closest('.field').classList.add('is-error');
       }
       try {
@@ -1019,13 +1072,13 @@
         lonIn.closest('.field').classList.remove('is-error');
       } catch (e) {
         ok = false;
-        $('#obs-lon-hint').textContent = e.message;
+        $('#obs-lon-hint').textContent = errText(e);
         lonIn.closest('.field').classList.add('is-error');
       }
       var elev = parseFloat(elevIn.value);
       if (!isFinite(elev)) elev = 0;
       if (!ok) return;
-      settings.site = { name: '自定义', lat: lat, lon: lon, elev: elev };
+      settings.site = { name: '自定义', lat: lat, lon: lon, elev: elev }; // 名称存中文，显示时由 siteName() 翻译
       siteSel.value = 'custom';
       saveSettings();
       onObserverChange();
@@ -1034,10 +1087,10 @@
 
     $('#obs-geo').addEventListener('click', function () {
       if (!navigator.geolocation) {
-        toast('当前浏览器不支持定位');
+        toast(T('当前浏览器不支持定位'));
         return;
       }
-      toast('正在获取位置…');
+      toast(T('正在获取位置…'));
       navigator.geolocation.getCurrentPosition(function (pos) {
         settings.site = {
           name: '当前位置', lat: pos.coords.latitude, lon: pos.coords.longitude,
@@ -1046,9 +1099,9 @@
         saveSettings();
         showSite();
         onObserverChange();
-        toast('已使用当前位置');
+        toast(T('已使用当前位置'));
       }, function (err) {
-        toast(err.code === 1 ? '定位权限被拒绝，请手动输入经纬度' : '无法获取位置，请手动输入经纬度');
+        toast(err.code === 1 ? T('定位权限被拒绝，请手动输入经纬度') : T('无法获取位置，请手动输入经纬度'));
       }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
     });
 
@@ -1069,18 +1122,18 @@
     var s = settings.site;
     var lat = Math.abs(s.lat).toFixed(2) + '°' + (s.lat >= 0 ? 'N' : 'S');
     var lon = Math.abs(s.lon).toFixed(2) + '°' + (s.lon >= 0 ? 'E' : 'W');
-    return s.name + '（' + lat + ', ' + lon + (s.elev ? ', ' + Math.round(s.elev) + ' m' : '') + '）';
+    return siteName(s) + paren(lat + ', ' + lon + (s.elev ? ', ' + Math.round(s.elev) + ' m' : ''));
   }
   /** 观测时刻与地点的简短说明，如"实时 · 北京"或"2026-10-19 22:00:00 · 北京"（地平坐标输入、结果标题用） */
   function obsLabel() {
-    return (timeState.mode === 'live' ? '实时' : fmtDateTime(obsDate(), settings.tz)) + ' · ' + settings.site.name;
+    return (timeState.mode === 'live' ? T('实时') : fmtDateTime(obsDate(), settings.tz)) + ' · ' + siteName(settings.site);
   }
   function updateObserverSummary() {
     var d = obsDate();
     var tzLabel = fmtOffset(tzOffsetMin(d, settings.tz));
-    var t = timeState.mode === 'live' ? '实时' : fmtDateTime(d, settings.tz);
+    var t = timeState.mode === 'live' ? T('实时') : fmtDateTime(d, settings.tz);
     $('#obs-summary').textContent = t + ' · ' + tzLabel + ' · ' + siteText();
-    $('#out-site').textContent = siteText() + ' · ' + (timeState.mode === 'live' ? '实时' : fmtDateTime(d, settings.tz)) + '（' + tzLabel + '）';
+    $('#out-site').textContent = siteText() + ' · ' + t + paren(tzLabel);
   }
 
   function onObserverChange() {
@@ -1120,9 +1173,9 @@
       // 要复制的文字记在 data-copy 上（为空表示复制显示的文字），点击由 initCopy() 统一处理。
       // 不给每个元素单独绑定事件，这样结果被"原地更新"后复制的仍是最新数值
       val.setAttribute('data-copy', r[2] || '');
-      val.title = '点击复制';
+      val.title = T('点击复制');
       val.style.cursor = 'copy';
-      var btn = h('button', { type: 'button', class: 'copy-btn', title: '复制', 'aria-label': '复制' + r[0] });
+      var btn = h('button', { type: 'button', class: 'copy-btn', title: T('复制'), 'aria-label': T('复制{label}', { label: r[0] }) });
       btn.innerHTML = COPY_ICON;
       g.appendChild(btn);
     });
@@ -1150,7 +1203,10 @@
     return h('div', { class: 'section-title', text: text });
   }
   function emptyState(parsed, what) {
-    var msg = parsed && parsed.empty ? '请输入' + (what || '目标') + '的坐标，或在上方搜索天体名称' : '请检查' + (what || '目标') + '坐标的输入格式（输入框下方有提示）';
+    // 英文句子里默认的"目标"写作 the target；"目标 A/B"按专名翻译
+    var w = I18n.isEn ? (what ? T(what) : 'the target') : (what || '目标');
+    var msg = parsed && parsed.empty ? T('请输入{what}的坐标，或在上方搜索天体名称', { what: w })
+      : T('请检查{what}坐标的输入格式（输入框下方有提示）', { what: w });
     return h('div', { class: 'empty', text: msg });
   }
   function notes(lines) {
@@ -1225,39 +1281,39 @@
       fmt.appendChild(emptyState(A));
       return;
     }
-    var epochNote = A.sys === 'galactic' ? '' : '（' + A.epochLabel + '）';
-    fmt.appendChild(sectionTitle('格式转换 · ' + SYS_TEXT[A.sys].name + epochNote));
+    var epochNote = A.sys === 'galactic' ? '' : paren(A.epochLabel);
+    fmt.appendChild(sectionTitle(T('格式转换') + ' · ' + SYS_TEXT[A.sys].name + epochNote));
     var rows;
     if (A.sys === 'equatorial') {
       var ra = A.a, dec = A.b;
       var hrs = Angle.formatDecimal(ra / 15, prec()[0] + 5);
       rows = [
-        ['赤经 时分秒', fRA(ra), fRA(ra), true],
-        ['赤经 冒号格式', fRA(ra, 'colon'), fRA(ra, 'colon')],
-        ['赤经 十进制小时', hrs + ' h', hrs],
-        ['赤经 十进制度', fDeg(ra), Angle.formatDecimal(ra, prec()[0] + 4)],
-        ['赤纬 度分秒', fDec(dec), fDec(dec), true],
-        ['赤纬 冒号格式', fDec(dec, 'colon'), fDec(dec, 'colon')],
-        ['赤纬 十进制度', fDeg(dec, true), Angle.formatDecimal(dec, prec()[0] + 4, true)],
-        ['整行（空格）', fRA(ra, 'space') + ' ' + fDec(dec, 'space'), fRA(ra, 'space') + ' ' + fDec(dec, 'space')],
-        ['整行（十进制度）', Angle.formatDecimal(ra, prec()[0] + 4) + ' ' + Angle.formatDecimal(dec, prec()[0] + 4, true),
+        [T('赤经 时分秒'), fRA(ra), fRA(ra), true],
+        [T('赤经 冒号格式'), fRA(ra, 'colon'), fRA(ra, 'colon')],
+        [T('赤经 十进制小时'), hrs + ' h', hrs],
+        [T('赤经 十进制度'), fDeg(ra), Angle.formatDecimal(ra, prec()[0] + 4)],
+        [T('赤纬 度分秒'), fDec(dec), fDec(dec), true],
+        [T('赤纬 冒号格式'), fDec(dec, 'colon'), fDec(dec, 'colon')],
+        [T('赤纬 十进制度'), fDeg(dec, true), Angle.formatDecimal(dec, prec()[0] + 4, true)],
+        [T('整行（空格）'), fRA(ra, 'space') + ' ' + fDec(dec, 'space'), fRA(ra, 'space') + ' ' + fDec(dec, 'space')],
+        [T('整行（十进制度）'), Angle.formatDecimal(ra, prec()[0] + 4) + ' ' + Angle.formatDecimal(dec, prec()[0] + 4, true),
           Angle.formatDecimal(ra, prec()[0] + 4) + ' ' + Angle.formatDecimal(dec, prec()[0] + 4, true)]
       ];
     } else {
       var t = SYS_TEXT[A.sys];
       var la = Angle.formatDecimal(A.a, prec()[0] + 4), lb = Angle.formatDecimal(A.b, prec()[0] + 4, true);
       rows = [
-        [t.a + ' 度分秒', fLon(A.a), fLon(A.a), true],
-        [t.a + ' 十进制', la + '°', la],
-        [t.b + ' 度分秒', fDec(A.b), fDec(A.b), true],
-        [t.b + ' 十进制', lb + '°', lb],
-        ['整行（十进制度）', la + ' ' + lb, la + ' ' + lb]
+        [T('{label} 度分秒', { label: t.a }), fLon(A.a), fLon(A.a), true],
+        [T('{label} 十进制', { label: t.a }), la + '°', la],
+        [T('{label} 度分秒', { label: t.b }), fDec(A.b), fDec(A.b), true],
+        [T('{label} 十进制', { label: t.b }), lb + '°', lb],
+        [T('整行（十进制度）'), la + ' ' + lb, la + ' ' + lb]
       ];
     }
     fmt.appendChild(kv(rows));
 
     // ---- 各坐标系 ----
-    sysEl.appendChild(sectionTitle('坐标系转换'));
+    sysEl.appendChild(sectionTitle(T('坐标系转换')));
     var v = A.v;
     var j = A.icrs;
     var b1950 = Astro.icrsToFk4(v);
@@ -1266,24 +1322,24 @@
     var con = Astro.constellationOf(v, Data.constellationBounds);
     var isHz = A.sys === 'horizontal'; // 由地平坐标反算时，赤经赤纬就是要找的结果，加粗显示
     var sysRows = [
-      ['赤道 J2000', pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), isHz],
-      ['赤道 B1950', pair(fRA(b1950.ra), fDec(b1950.dec)), fRA(b1950.ra) + ' ' + fDec(b1950.dec)],
-      ['银道 l, b', pair(fDeg(gal.l), fDeg(gal.b, true)), Angle.formatDecimal(gal.l, prec()[0] + 4) + ' ' + Angle.formatDecimal(gal.b, prec()[0] + 4, true)],
-      ['黄道 λ, β', pair(fDeg(ecl.lon), fDeg(ecl.lat, true), 'J2000'), Angle.formatDecimal(ecl.lon, prec()[0] + 4) + ' ' + Angle.formatDecimal(ecl.lat, prec()[0] + 4, true)],
-      ['所在星座', con ? constellationName(con) + '（' + con + '）' : '—', con ? constellationName(con) : '']
+      [T('赤道 J2000'), pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), isHz],
+      [T('赤道 B1950'), pair(fRA(b1950.ra), fDec(b1950.dec)), fRA(b1950.ra) + ' ' + fDec(b1950.dec)],
+      [T('银道 l, b'), pair(fDeg(gal.l), fDeg(gal.b, true)), Angle.formatDecimal(gal.l, prec()[0] + 4) + ' ' + Angle.formatDecimal(gal.b, prec()[0] + 4, true)],
+      [T('黄道 λ, β'), pair(fDeg(ecl.lon), fDeg(ecl.lat, true), 'J2000'), Angle.formatDecimal(ecl.lon, prec()[0] + 4) + ' ' + Angle.formatDecimal(ecl.lat, prec()[0] + 4, true)],
+      [T('所在星座'), con ? constellationName(con) + paren(con) : '—', con ? constellationName(con) : '']
     ];
     var sysNotes = [
-      'J2000 即 ICRS 赤道坐标；B1950 为 FK4 参考系（含 E 项改正），按 SLALIB FK45Z/FK54Z 算法换算。',
-      '银道坐标采用 IAU 1958 定义；黄道坐标为 J2000 平黄道、平春分点。其他历元请到“历元岁差”页查看。'
+      T('J2000 即 ICRS 赤道坐标；B1950 为 FK4 参考系（含 E 项改正），按 SLALIB FK45Z/FK54Z 算法换算。'),
+      T('银道坐标采用 IAU 1958 定义；黄道坐标为 J2000 平黄道、平春分点。其他历元请到“历元岁差”页查看。')
     ];
     if (isHz) {
       // 地平坐标输入：另外给出观测时刻的视赤经赤纬（赤道仪、望远镜控制软件常用的 JNow 坐标）和时角
       var o = Astro.observe(v, obsDate(), settings.site, { refraction: settings.refraction });
       sysRows.splice(1, 0,
-        ['赤道 视位置', pair(fRA(o.raApp), fDec(o.decApp), 'JNow'), fRA(o.raApp) + ' ' + fDec(o.decApp), true],
-        ['时角 HA', fHMSsigned(o.ha), fHMSsigned(o.ha)]);
-      sysNotes.unshift('地平坐标按观测时间与地点换算：由方位角、高度角求出时角和视赤纬（勾选大气折射时先扣除折射），' +
-        '视赤经 = 地方视恒星时 − 时角，再换算到 J2000。' + (timeState.mode === 'live' ? '实时模式下结果每秒更新。' : ''));
+        [T('赤道 视位置'), pair(fRA(o.raApp), fDec(o.decApp), 'JNow'), fRA(o.raApp) + ' ' + fDec(o.decApp), true],
+        [T('时角 HA'), fHMSsigned(o.ha), fHMSsigned(o.ha)]);
+      sysNotes.unshift(T('地平坐标按观测时间与地点换算：由方位角、高度角求出时角和视赤纬（勾选大气折射时先扣除折射），' +
+        '视赤经 = 地方视恒星时 − 时角，再换算到 J2000。') + (timeState.mode === 'live' ? T('实时模式下结果每秒更新。') : ''));
     }
     sysEl.appendChild(kv(sysRows));
     sysEl.appendChild(notes(sysNotes));
@@ -1303,50 +1359,50 @@
     var v = A.v;
     var j = A.icrs;
     var rows = [];
-    rows.push(['输入（J2000）', pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec)]);
+    rows.push([T('输入（J2000）'), pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec)]);
     var main;
     if (r.epoch.kind === 'J2000') {
       main = j;
-      rows.push(['J2000.0 位置', pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), true]);
+      rows.push([T('J2000.0 位置'), pair(fRA(j.ra), fDec(j.dec)), fRA(j.ra) + ' ' + fDec(j.dec), true]);
     } else if (r.epoch.kind === 'B1950') {
       main = Astro.icrsToFk4(v);
-      rows.push(['B1950.0（FK4）', pair(fRA(main.ra), fDec(main.dec)), fRA(main.ra) + ' ' + fDec(main.dec), true]);
+      rows.push(['B1950.0' + paren('FK4'), pair(fRA(main.ra), fDec(main.dec)), fRA(main.ra) + ' ' + fDec(main.dec), true]);
     } else {
       main = Astro.icrsToEquatorial(v, { kind: 'jd', jdTT: r.jdTT });
       var app = Astro.icrsToEquatorial(v, { kind: 'jd', jdTT: r.jdTT, apparent: true });
-      rows.push(['平位置', pair(fRA(main.ra), fDec(main.dec)), fRA(main.ra) + ' ' + fDec(main.dec), true]);
-      rows.push(['视位置', pair(fRA(app.ra), fDec(app.dec)), fRA(app.ra) + ' ' + fDec(app.dec), true]);
+      rows.push([T('平位置'), pair(fRA(main.ra), fDec(main.dec)), fRA(main.ra) + ' ' + fDec(main.dec), true]);
+      rows.push([T('视位置'), pair(fRA(app.ra), fDec(app.dec)), fRA(app.ra) + ' ' + fDec(app.dec), true]);
     }
     var dRa = ((main.ra - j.ra + 540) % 360) - 180;
     var dDec = main.dec - j.dec;
-    rows.push(['赤经变化 Δα', fDeltaTime(dRa) + '（' + fDeltaArc(dRa * Math.cos(j.dec * Math.PI / 180)) + ' 天球上）', fDeltaTime(dRa)]);
-    rows.push(['赤纬变化 Δδ', fDeltaArc(dDec), fDeltaArc(dDec)]);
+    rows.push([T('赤经变化 Δα'), T('{dt}（{da} 天球上）', { dt: fDeltaTime(dRa), da: fDeltaArc(dRa * Math.cos(j.dec * Math.PI / 180)) }), fDeltaTime(dRa)]);
+    rows.push([T('赤纬变化 Δδ'), fDeltaArc(dDec), fDeltaArc(dDec)]);
     if (r.epoch.kind === 'jd') {
       var ecl = Astro.icrsToEcliptic(v, { kind: 'jd', jdTT: r.jdTT });
-      rows.push(['黄道 λ, β', pair(fDeg(ecl.lon), fDeg(ecl.lat, true), '该历元'), Angle.formatDecimal(ecl.lon, 6) + ' ' + Angle.formatDecimal(ecl.lat, 6, true)]);
+      rows.push([T('黄道 λ, β'), pair(fDeg(ecl.lon), fDeg(ecl.lat, true), T('该历元')), Angle.formatDecimal(ecl.lon, 6) + ' ' + Angle.formatDecimal(ecl.lat, 6, true)]);
     }
-    out.appendChild(sectionTitle('换算结果 · ' + r.label));
+    out.appendChild(sectionTitle(T('换算结果') + ' · ' + r.label));
     out.appendChild(kv(rows));
 
     // 历元信息
     var jd = r.jdTT;
     var info = 'JD(TT) ' + jd.toFixed(5) + ' · J' + Astro.julianEpoch(jd).toFixed(4) + ' · B' + Astro.besselianEpoch(jd).toFixed(4);
-    out.appendChild(sectionTitle('历元信息'));
-    var infoRows = [['儒略日与历元', info, jd.toFixed(5)]];
+    out.appendChild(sectionTitle(T('历元信息')));
+    var infoRows = [[T('儒略日与历元'), info, jd.toFixed(5)]];
     if (r.epoch.kind === 'jd') {
       var jdUtc = Astro.jdFromDate(r.date);
       infoRows.push(['TT − UTC', Astro.ttMinusUtc(jdUtc).toFixed(3) + ' s']);
       var n = Astro.nutation(jd);
-      infoRows.push(['章动 Δψ, Δε', (n.dpsi * 206264.806).toFixed(3) + '″, ' + (n.deps * 206264.806).toFixed(3) + '″']);
-      infoRows.push(['平黄赤交角 ε', Angle.formatDMS(Astro.obl06(jd) * 180 / Math.PI, 3, 'dms', false)]);
+      infoRows.push([T('章动 Δψ, Δε'), (n.dpsi * 206264.806).toFixed(3) + '″, ' + (n.deps * 206264.806).toFixed(3) + '″']);
+      infoRows.push([T('平黄赤交角 ε'), Angle.formatDMS(Astro.obl06(jd) * 180 / Math.PI, 3, 'dms', false)]);
     }
     out.appendChild(kv(infoRows));
     var lines = [
-      '平位置：该历元的平赤道与平春分点（只改正岁差，IAU 2006 模型）。',
-      '视位置：在平位置基础上再改正章动与周年光行差，为地心视位置（不含周日光行差与大气折射）。',
-      '未计入天体自行；对高自行恒星，请使用对应历元的星表坐标。'
+      T('平位置：该历元的平赤道与平春分点（只改正岁差，IAU 2006 模型）。'),
+      T('视位置：在平位置基础上再改正章动与周年光行差，为地心视位置（不含周日光行差与大气折射）。'),
+      T('未计入天体自行；对高自行恒星，请使用对应历元的星表坐标。')
     ];
-    if (r.fk4 || A.epoch && A.epoch.kind === 'B1950') lines.push('B1950.0 采用 FK4 参考系（含 E 项改正），并假定天体在 FK5 中没有自行。');
+    if (r.fk4 || A.epoch && A.epoch.kind === 'B1950') lines.push(T('B1950.0 采用 FK4 参考系（含 E 项改正），并假定天体在 FK5 中没有自行。'));
     out.appendChild(notes(lines));
   }
 
@@ -1373,7 +1429,7 @@
       var d = roundMinute(Astro.dateFromJd(jd));
       var q = zonedParts(d, settings.tz);
       var sameDay = q.y === p.y && q.mo === p.mo && q.d === p.d;
-      return { time: fmtHM(d, settings.tz), note: sameDay ? '当日' : (q.mo + '月' + q.d + '日') };
+      return { time: fmtHM(d, settings.tz), note: sameDay ? T('当日') : I18n.monthDay(q.mo, q.d) };
     }
     var t = {}; // 引用键 → 显示文字
     // 高度角、方位角的小数位随"显示精度"变化：低 3 位（约 3.6″）、标准 4 位（约 0.36″）、高 5 位
@@ -1382,40 +1438,41 @@
     var azDec = o.az.toFixed(hd), azDms = fLon(o.az);
     if (+azDec >= 360) azDec = (0).toFixed(hd);
     if (/^360/.test(azDms)) azDms = fLon(0);
-    t.altLabel = '高度角' + (settings.refraction ? '（含折射）' : '');
+    t.altLabel = settings.refraction ? T('高度角（含折射）') : T('高度角');
     t.alt = (o.alt >= 0 ? '+' : '') + o.alt.toFixed(hd) + '°';
-    t.altState = o.alt > 0 ? '地平线以上' : '地平线以下';
+    t.altState = o.alt > 0 ? T('地平线以上') : T('地平线以下');
     t.az = azDec + '°';
     t.azDir = compass8(o.az);
     var tr = when(rts.transit);
     var kind = rts.circumpolar ? 'circ' : rts.neverRises ? 'never' : 'normal';
     if (kind === 'circ') {
-      t.rtsNote = '拱极天体：在该地终日不落。上中天 ' + tr.time + '（' + tr.note + '），最高 ' + (rts.maxAlt + refrMax).toFixed(1) + '°，最低 ' + (rts.minAlt + refrMin).toFixed(1) + '°。';
+      t.rtsNote = T('拱极天体：在该地终日不落。上中天 {time}（{note}），最高 {max}°，最低 {min}°。',
+        { time: tr.time, note: tr.note, max: (rts.maxAlt + refrMax).toFixed(1), min: (rts.minAlt + refrMin).toFixed(1) });
     } else if (kind === 'never') {
-      t.rtsNote = '在该地终年不会升起：上中天时最高也只有 ' + (rts.maxAlt + refrMax).toFixed(1) + '°。';
+      t.rtsNote = T('在该地终年不会升起：上中天时最高也只有 {max}°。', { max: (rts.maxAlt + refrMax).toFixed(1) });
     } else {
       var rise = when(rts.rise), set = when(rts.set);
       t.rise = rise.time;
       t.riseNote = rise.note;
       t.transit = tr.time;
-      t.transitNote = '最高 ' + (rts.maxAlt + refrMax).toFixed(1) + '° · ' + tr.note;
+      t.transitNote = T('最高 {max}° · {note}', { max: (rts.maxAlt + refrMax).toFixed(1), note: tr.note });
       t.set = set.time;
       t.setNote = set.note;
     }
     // 详细数值：[标签, 文字, 复制文字, 强调, 引用键]；精度都随"显示精度"变化
     var sd = prec()[0]; // 恒星时秒的小数位，与赤经一致
     var rows = [
-      ['高度角 度分秒', fDec(o.alt), fDec(o.alt), false, 'altDms'],
-      ['方位角 度分秒', azDms, azDms, false, 'azDms'],
-      ['时角 HA', fHMSsigned(o.ha) + (o.ha < 0 ? '（东侧，尚未中天）' : '（西侧，已过中天）'), fHMSsigned(o.ha), false, 'ha'],
-      ['地方视恒星时', Angle.formatHMS(o.last, sd), Angle.formatHMS(o.last, sd), false, 'last'],
-      ['地方平恒星时', Angle.formatHMS(o.lmst, sd), Angle.formatHMS(o.lmst, sd), false, 'lmst'],
-      ['格林尼治视恒星时', Angle.formatHMS(o.gast, sd), Angle.formatHMS(o.gast, sd), false, 'gast'],
-      ['格林尼治平恒星时', Angle.formatHMS(o.gmst, sd), Angle.formatHMS(o.gmst, sd), false, 'gmst'],
-      ['视赤经、视赤纬', fRA(o.raApp) + '  ' + fDec(o.decApp), fRA(o.raApp) + ' ' + fDec(o.decApp), false, 'app'],
-      ['大气质量', o.airmass ? o.airmass.toFixed(3) : '—（地平线以下）', o.airmass ? o.airmass.toFixed(3) : '', false, 'airmass'],
-      ['大气折射', settings.refraction ? (o.refraction > 0 ? '+' + (o.refraction * 60).toFixed(2) + '′' : '0（地平线以下不计）') : '未计入', false, false, 'refr'],
-      ['星位角 q', Angle.formatDecimal(o.parallactic, hd - 1, true) + '°', Angle.formatDecimal(o.parallactic, hd - 1, true), false, 'pa']
+      [T('高度角 度分秒'), fDec(o.alt), fDec(o.alt), false, 'altDms'],
+      [T('方位角 度分秒'), azDms, azDms, false, 'azDms'],
+      [T('时角 HA'), fHMSsigned(o.ha) + (o.ha < 0 ? T('（东侧，尚未中天）') : T('（西侧，已过中天）')), fHMSsigned(o.ha), false, 'ha'],
+      [T('地方视恒星时'), Angle.formatHMS(o.last, sd), Angle.formatHMS(o.last, sd), false, 'last'],
+      [T('地方平恒星时'), Angle.formatHMS(o.lmst, sd), Angle.formatHMS(o.lmst, sd), false, 'lmst'],
+      [T('格林尼治视恒星时'), Angle.formatHMS(o.gast, sd), Angle.formatHMS(o.gast, sd), false, 'gast'],
+      [T('格林尼治平恒星时'), Angle.formatHMS(o.gmst, sd), Angle.formatHMS(o.gmst, sd), false, 'gmst'],
+      [T('视赤经、视赤纬'), fRA(o.raApp) + '  ' + fDec(o.decApp), fRA(o.raApp) + ' ' + fDec(o.decApp), false, 'app'],
+      [T('大气质量'), o.airmass ? o.airmass.toFixed(3) : T('—（地平线以下）'), o.airmass ? o.airmass.toFixed(3) : '', false, 'airmass'],
+      [T('大气折射'), settings.refraction ? (o.refraction > 0 ? '+' + (o.refraction * 60).toFixed(2) + '′' : T('0（地平线以下不计）')) : T('未计入'), false, false, 'refr'],
+      [T('星位角 q'), Angle.formatDecimal(o.parallactic, hd - 1, true) + '°', Angle.formatDecimal(o.parallactic, hd - 1, true), false, 'pa']
     ];
     return { date: date, o: o, rts: rts, kind: kind, t: t, rows: rows, up: o.alt > 0 };
   }
@@ -1436,7 +1493,7 @@
         h('div', { class: 'stat__sub' }, [chip])
       ]),
       h('div', { class: 'stat' }, [
-        h('div', { class: 'stat__label', text: '方位角（北起顺时针）' }),
+        h('div', { class: 'stat__label', text: T('方位角（北起顺时针）') }),
         ref('az', h('div', { class: 'stat__value' })),
         ref('azDir', h('div', { class: 'stat__sub' }))
       ])
@@ -1446,11 +1503,11 @@
         return h('div', { class: 'rts__item' }, [h('div', { class: 'rts__k', text: label }),
           ref(k, h('div', { class: 'rts__v' })), ref(k + 'Note', h('div', { class: 'rts__s' }))]);
       };
-      out.appendChild(h('div', { class: 'rts' }, [item('升起', 'rise'), item('上中天', 'transit'), item('落下', 'set')]));
+      out.appendChild(h('div', { class: 'rts' }, [item(T('升起'), 'rise'), item(T('上中天'), 'transit'), item(T('落下'), 'set')]));
     } else {
       out.appendChild(ref('rtsNote', h('div', { class: 'rts-note' })));
     }
-    out.appendChild(sectionTitle('详细数值'));
+    out.appendChild(sectionTitle(T('详细数值')));
     var rowRefs = {};
     out.appendChild(kv(m.rows, rowRefs));
     hz = { kind: m.kind, refs: refs, rows: rowRefs };
@@ -1525,9 +1582,10 @@
     chart.update({
       samples: samples, jdStart: jdStart, jdEnd: jdEnd, nowJd: nowJd, nowAlt: nowSample.alt, transit: transit, ticks: ticks,
       formatTime: function (jd) { return fmtHM(Astro.dateFromJd(jd), tz); },
-      formatAz: function (az) { return az.toFixed(1) + '°（' + compass8(az) + '）'; },
-      title: '高度角 · ' + pd.mo + '月' + pd.d + '日 12:00 至次日 12:00',
-      summary: (A.name || '目标') + '的高度角曲线：最高 ' + best.alt.toFixed(1) + '°，出现在 ' + fmtHM(Astro.dateFromJd(best.jd), tz)
+      formatAz: function (az) { return az.toFixed(1) + '°' + paren(compass8(az)); },
+      title: T('高度角 · {md} 12:00 至次日 12:00', { md: I18n.monthDay(pd.mo, pd.d) }),
+      summary: T('{name}的高度角曲线：最高 {max}°，出现在 {time}',
+        { name: A.name || T('目标'), max: best.alt.toFixed(1), time: fmtHM(Astro.dateFromJd(best.jd), tz) })
     });
   }
 
@@ -1546,22 +1604,22 @@
     var pa = Astro.positionAngle(A.icrs.ra, A.icrs.dec, B.icrs.ra, B.icrs.dec);
     out.appendChild(h('div', { class: 'stats' }, [
       h('div', { class: 'stat stat--accent' }, [
-        h('div', { class: 'stat__label', text: '角距离' }),
+        h('div', { class: 'stat__label', text: T('角距离') }),
         h('div', { class: 'stat__value', text: Angle.formatAngleAuto(sep) }),
         h('div', { class: 'stat__sub', text: Angle.formatDMS(sep, prec()[1] + 1, 'dms', false) })
       ]),
       h('div', { class: 'stat' }, [
-        h('div', { class: 'stat__label', text: '位置角 PA（B 相对 A）' }),
+        h('div', { class: 'stat__label', text: T('位置角 PA（B 相对 A）') }),
         h('div', { class: 'stat__value', text: pa.toFixed(2) + '°' }),
-        h('div', { class: 'stat__sub', text: '从北向东量 · 偏' + compass8(pa).split(' ')[0] })
+        h('div', { class: 'stat__sub', text: T('从北向东量 · 偏{dir}', { dir: compass8(pa).split(' ')[0] }) })
       ])
     ]));
     var rows = [
-      ['角距离（度）', Angle.formatDecimal(sep, 6) + '°', Angle.formatDecimal(sep, 6)],
-      ['角距离（角分）', Angle.formatDecimal(sep * 60, 4) + '′', Angle.formatDecimal(sep * 60, 4)],
-      ['角距离（角秒）', Angle.formatDecimal(sep * 3600, 3) + '″', Angle.formatDecimal(sep * 3600, 3)],
+      [T('角距离（度）'), Angle.formatDecimal(sep, 6) + '°', Angle.formatDecimal(sep, 6)],
+      [T('角距离（角分）'), Angle.formatDecimal(sep * 60, 4) + '′', Angle.formatDecimal(sep * 60, 4)],
+      [T('角距离（角秒）'), Angle.formatDecimal(sep * 3600, 3) + '″', Angle.formatDecimal(sep * 3600, 3)],
       // 位置角卡片只显示 2 位小数，这里给出随"显示精度"变化的完整数值
-      ['位置角 PA', Angle.formatDecimal(pa, prec()[1] + 3) + '°', Angle.formatDecimal(pa, prec()[1] + 3)]
+      [T('位置角 PA'), Angle.formatDecimal(pa, prec()[1] + 3) + '°', Angle.formatDecimal(pa, prec()[1] + 3)]
     ];
     // 小角度（望远镜视场量级）时给出切平面偏移：以 A 为切点的标准坐标，ξ 向东、η 向北；
     // 角距离较大时切平面投影失真严重，不再显示
@@ -1571,15 +1629,15 @@
       var den = Math.sin(d2) * Math.sin(d1) + Math.cos(d2) * Math.cos(d1) * Math.cos(a2 - a1);
       var xi = Math.cos(d2) * Math.sin(a2 - a1) / den / d2r;
       var eta = (Math.sin(d2) * Math.cos(d1) - Math.cos(d2) * Math.sin(d1) * Math.cos(a2 - a1)) / den / d2r;
-      rows.push(['向东偏移 ξ', fDeltaArc(xi), fDeltaArc(xi)]);
-      rows.push(['向北偏移 η', fDeltaArc(eta), fDeltaArc(eta)]);
+      rows.push([T('向东偏移 ξ'), fDeltaArc(xi), fDeltaArc(xi)]);
+      rows.push([T('向北偏移 η'), fDeltaArc(eta), fDeltaArc(eta)]);
     }
-    rows.push(['A（J2000）', pair(fRA(A.icrs.ra), fDec(A.icrs.dec)), fRA(A.icrs.ra) + ' ' + fDec(A.icrs.dec)]);
-    rows.push(['B（J2000）', pair(fRA(B.icrs.ra), fDec(B.icrs.dec)), fRA(B.icrs.ra) + ' ' + fDec(B.icrs.dec)]);
-    out.appendChild(sectionTitle('详细数值'));
+    rows.push(['A' + paren('J2000'), pair(fRA(A.icrs.ra), fDec(A.icrs.dec)), fRA(A.icrs.ra) + ' ' + fDec(A.icrs.dec)]);
+    rows.push(['B' + paren('J2000'), pair(fRA(B.icrs.ra), fDec(B.icrs.dec)), fRA(B.icrs.ra) + ' ' + fDec(B.icrs.dec)]);
+    out.appendChild(sectionTitle(T('详细数值')));
     out.appendChild(kv(rows));
-    var sepNotes = ['两个坐标会先各自换算到 ICRS（J2000）再计算，因此可以混用不同坐标系和历元。'];
-    if (sep < 10) sepNotes.push('ξ、η 为以 A 为切点的标准坐标（切平面投影），适合望远镜视场内的偏移计算。');
+    var sepNotes = [T('两个坐标会先各自换算到 ICRS（J2000）再计算，因此可以混用不同坐标系和历元。')];
+    if (sep < 10) sepNotes.push(T('ξ、η 为以 A 为切点的标准坐标（切平面投影），适合望远镜视场内的偏移计算。'));
     out.appendChild(notes(sepNotes));
   }
 
@@ -1649,7 +1707,7 @@
     if (!map) return;
     if (A.ok) {
       map.setMarker('target', A.icrs);
-      $('#marker-target-label').textContent = A.name || '目标';
+      $('#marker-target-label').textContent = A.name || T('目标');
       flySoon();
     } else {
       map.setMarker('target', null);
@@ -1690,17 +1748,18 @@
     var name = $('#hud-name'), coord = $('#hud-coord'), meta = $('#hud-meta');
     var badge = $('#target-badge');
     if (!A.ok) {
-      name.textContent = '等待输入坐标';
+      name.textContent = T('等待输入坐标');
       coord.textContent = '';
       meta.textContent = '';
       badge.hidden = true;
       return;
     }
     var con = Astro.constellationOf(A.v, Data.constellationBounds);
-    name.textContent = A.name || '自定义坐标';
+    name.textContent = A.name || T('自定义坐标');
     coord.textContent = 'α ' + Angle.formatHMS(A.icrs.ra / 15, 1) + '  δ ' + Angle.formatDMS(A.icrs.dec, 0);
     var o = obs || Astro.observe(A.v, obsDate(), settings.site, { refraction: settings.refraction });
-    meta.textContent = 'J2000 · ' + (con ? constellationName(con) : '') + ' · 高度 ' + (o.alt >= 0 ? '+' : '') + o.alt.toFixed(1) + '° · 方位 ' + (Math.round(o.az) % 360) + '°';
+    meta.textContent = 'J2000 · ' + (con ? constellationName(con) : '') + ' · ' +
+      T('高度 {alt}° · 方位 {az}°', { alt: (o.alt >= 0 ? '+' : '') + o.alt.toFixed(1), az: Math.round(o.az) % 360 });
     badge.hidden = false;
     badge.textContent = (A.name ? A.name + ' · ' : '') + (con ? constellationName(con) : '');
   }
@@ -1747,7 +1806,7 @@
 
     // 触屏设备上的操作提示换成触摸手势；首次拖动/点击后淡出提示
     if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
-      $('#map-hint').textContent = '拖动平移 · 双指缩放 · 轻点星图拾取坐标';
+      $('#map-hint').textContent = T('拖动平移 · 双指缩放 · 轻点星图拾取坐标');
     }
     $('#sky').addEventListener('pointerdown', function () {
       $('#map-hint').classList.add('is-faded');
@@ -1764,11 +1823,11 @@
     }
     var s = info.star;
     clear(tip);
-    var title = s.zh || s.en || s.desig || ('HIP ' + s.hip);
-    tip.appendChild(h('b', { text: title }));
-    var sub = [s.zh && s.en ? s.en : '', s.desig, s.con ? constellationName(s.con) : ''].filter(Boolean).join(' · ');
+    tip.appendChild(h('b', { text: starLabel(s) }));
+    var sub = [I18n.isEn ? '' : (s.zh && s.en ? s.en : ''), starLabel(s) !== s.desig ? s.desig : '', s.con ? constellationName(s.con) : '']
+      .filter(Boolean).join(' · ');
     if (sub) tip.appendChild(h('div', { text: sub }));
-    tip.appendChild(h('div', { text: '星等 ' + s.mag.toFixed(2) + (s.hip ? ' · HIP ' + s.hip : '') }));
+    tip.appendChild(h('div', { text: T('星等 {mag}', { mag: s.mag.toFixed(2) }) + (s.hip ? ' · HIP ' + s.hip : '') }));
     tip.appendChild(h('div', { text: Angle.formatHMS(s.ra / 15, 1) + '  ' + Angle.formatDMS(s.dec, 0) }));
     tip.hidden = false;
     var x = info.x + 16, y = info.y + 16;
@@ -1785,12 +1844,12 @@
     var pop = $('#pick-pop');
     picked = info;
     var s = info.star;
-    $('#pick-title').textContent = s ? (s.zh || s.en || s.desig || 'HIP ' + s.hip) + (s.zh && s.en ? ' · ' + s.en : '') : '天球位置';
+    $('#pick-title').textContent = s ? starLabel(s) + (!I18n.isEn && s.zh && s.en ? ' · ' + s.en : '') : T('天球位置');
     var coord = $('#pick-coord');
     clear(coord);
     coord.appendChild(h('div', { text: 'α ' + Angle.formatHMS(info.ra / 15, 2) + '  δ ' + Angle.formatDMS(info.dec, 1) }));
     var con = Astro.constellationOf(Astro.vecFromRaDec(info.ra, info.dec), Data.constellationBounds);
-    coord.appendChild(h('div', { text: 'J2000 · ' + (con ? constellationName(con) : '') + (s ? ' · ' + s.mag.toFixed(2) + ' 等' : '') }));
+    coord.appendChild(h('div', { text: 'J2000 · ' + (con ? constellationName(con) : '') + (s ? ' · ' + T('{mag} 等', { mag: s.mag.toFixed(2) }) : '') }));
     pop.hidden = false;
     var x = Math.min(info.x + 12, window.innerWidth - pop.offsetWidth - 10);
     var y = Math.min(info.y + 12, window.innerHeight - pop.offsetHeight - 10);
@@ -1802,7 +1861,7 @@
   }
   function pickName() {
     var s = picked && picked.star;
-    return s ? (s.zh || s.en || s.desig || 'HIP ' + s.hip) : null;
+    return s ? starLabel(s) : null;
   }
   function initPick() {
     $('#pick-set-a').addEventListener('click', function () {
@@ -1881,7 +1940,32 @@
 
   var coordA = null, coordB = null;
 
+  /**
+   * 保存的目标名称（上次使用、分享链接里的 name）可能是另一种语言：
+   * 能在常用天体或星表中找到的，换成当前语言的名称；找不到的（如 SIMBAD 名称）原样保留
+   */
+  function localizeName(name) {
+    if (!name) return name;
+    var objs = Data.objects || [];
+    for (var i = 0; i < objs.length; i++) {
+      if (objs[i].zh === name || objs[i].en === name) return objName(objs[i]);
+    }
+    var ids = map ? map.namedStars() : [];
+    for (var k = 0; k < ids.length; k++) {
+      var s = map.starInfo(ids[k]);
+      if ((s.zh && s.zh === name) || (s.en && s.en === name)) return starLabel(s);
+    }
+    return name;
+  }
+
   function init() {
+    // 语言切换按钮：显示"要切换到的语言"，点击后保存选择并刷新页面
+    var langBtn = $('#btn-lang');
+    langBtn.textContent = I18n.isEn ? '中文' : 'EN';
+    langBtn.title = I18n.isEn ? '切换到中文' : 'Switch to English';
+    langBtn.setAttribute('lang', I18n.isEn ? 'zh-CN' : 'en');
+    langBtn.addEventListener('click', function () { I18n.setLang(I18n.isEn ? 'zh' : 'en'); });
+
     // 夜视模式与精度设置
     document.documentElement.classList.toggle('night', !!settings.night);
     var nightBtn = $('#btn-night');
@@ -1916,7 +2000,7 @@
     initCopy();
 
     // 输出历元选择器（历元岁差页），默认"观测时刻"
-    epochOut = createEpochPicker($('#epoch-out'), { name: 'epoch-out', label: '目标历元', defaultMode: 'obs', allowApparent: false, onChange: renderEpoch });
+    epochOut = createEpochPicker($('#epoch-out'), { name: 'epoch-out', label: T('目标历元'), defaultMode: 'obs', allowApparent: false, onChange: renderEpoch });
 
     // 目标 A / 目标 B
     coordA = createCoordInput($('#coord-a'), {
@@ -1941,8 +2025,9 @@
     // 初始目标：地址栏参数 > 上次使用 > 默认仙女座星系（M31）
     var m31 = (Data.objects || []).find(function (o) { return o.id === 'm31'; });
     var m33 = (Data.objects || []).find(function (o) { return o.id === 'm33'; });
-    var start = readHash() || store.get('lastTarget', null) || (m31 && { ra: m31.ra, dec: m31.dec, name: m31.zh });
-    if (m33) coordB.setEquatorialJ2000(m33.ra, m33.dec, m33.zh);
+    var start = readHash() || store.get('lastTarget', null) || (m31 && { ra: m31.ra, dec: m31.dec, name: objName(m31) });
+    if (m33) coordB.setEquatorialJ2000(m33.ra, m33.dec, objName(m33));
+    if (start) start.name = localizeName(start.name);
     if (start) {
       lastFly = { ra: start.ra, dec: start.dec };
       // 开场：从较大视场缓缓推近到目标

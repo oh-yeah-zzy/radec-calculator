@@ -3,7 +3,7 @@
  *
  * 功能：
  *   · 用球极投影（stereographic，保角、无接缝）绘制真实星空：约 5000 颗 ≤6 等亮星（按 B−V 色指数着色）、
- *     银河、星座连线与中文名、亮星中文名、赤经赤纬网格、天赤道与黄道；
+ *     银河、星座连线与星座名、亮星星名（中文界面用中文名，英文界面用拉丁星座名与英文星名）、赤经赤纬网格、天赤道与黄道；
  *   · 可叠加观测地的地平线：地平线以下罩一层暗色"地面"，并标出东南西北；
  *   · 标出目标天体（以及"角距离"功能里的第二个天体和两者之间的大圆弧）；
  *   · 支持拖动平移、滚轮/双指缩放、点击拾取坐标、鼠标悬停显示星名；
@@ -21,6 +21,12 @@
   var TAU = Math.PI * 2;
   var OBLIQUITY_J2000 = 23.4392911 * D2R; // J2000 平黄赤交角，用于画黄道
   var FONT = '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif';
+  // 界面语言（见 js/i18n.js）：决定星名、星座名与方位字的写法；单独使用本模块时为中文
+  var I18n = root.RaDec && root.RaDec.I18n;
+  var EN = !!(I18n && I18n.isEn);
+  function T(s) {
+    return I18n ? I18n.t(s) : s;
+  }
 
   function clamp(x, lo, hi) {
     return x < lo ? lo : x > hi ? hi : x;
@@ -170,14 +176,14 @@
     }
     // 星名表：序号 → {zh, en, bayer, flam, con, hip}
     this.names = new Map();
-    this.labelStars = []; // 有中文名的星（序号已按星等由亮到暗）
+    this.labelStars = []; // 有当前语言星名的星（序号已按星等由亮到暗）
     var recs = (data.starNames || '').split(';');
     for (var k = 0; k < recs.length; k++) {
       if (!recs[k]) continue;
       var f = recs[k].split('|');
       var idx = +f[0];
       this.names.set(idx, { zh: f[1], en: f[2], bayer: f[3], flam: f[4], con: f[5], hip: f[6] });
-      if (f[1]) this.labelStars.push(idx);
+      if (EN ? f[2] : f[1]) this.labelStars.push(idx);
     }
     this.labelStars.sort(function (x, y) { return x - y; });
   };
@@ -199,7 +205,8 @@
         }
         return pts;
       });
-      return { ab: c.ab, zh: c.zh, rank: c.rank, label: vec(c.label[0], c.label[1]), lines: lines };
+      // name：星图上显示的星座名（中文名或拉丁名）
+      return { ab: c.ab, zh: c.zh, name: EN ? c.la : c.zh, rank: c.rank, label: vec(c.label[0], c.label[1]), lines: lines };
     });
   };
 
@@ -901,7 +908,7 @@
       var ring = [];
       for (var a = 0; a <= 360; a += 2) ring.push(around(a));
       this._hzRing = ring;
-      this._hzCards = [['北', around(0)], ['东', around(90)], ['南', around(180)], ['西', around(270)]];
+      this._hzCards = [[T('北'), around(0)], [T('东'), around(90)], [T('南'), around(180)], [T('西'), around(270)]];
       this._hzFor = this.horizon;
     }
     ctx.beginPath();
@@ -937,11 +944,11 @@
       ctx.stroke();
       ctx.font = '11px ' + FONT;
       ctx.fillStyle = 'rgba(160, 240, 195, 0.8)';
-      ctx.fillText('天顶', p[0], p[1] + 16);
+      ctx.fillText(T('天顶'), p[0], p[1] + 16);
     }
   };
 
-  /** 星座名与亮星中文名；用简单的矩形碰撞检测避免文字互相重叠 */
+  /** 星座名与亮星星名；用简单的矩形碰撞检测避免文字互相重叠 */
   P._drawLabels = function () {
     var ctx = this.ctx;
     var placed = [];
@@ -972,12 +979,12 @@
       if (c.rank > maxRank || !this._project(c.label, p)) continue;
       var size = c.rank === 1 ? 14 : c.rank === 2 ? 13 : 12;
       ctx.font = size + 'px ' + FONT;
-      var w = this._textWidth(ctx, size, c.zh);
+      var w = this._textWidth(ctx, size, c.name);
       if (!free(p[0] - w / 2 - 2, p[1] - size / 2 - 2, w + 4, size + 4)) continue;
       ctx.fillStyle = 'rgba(150, 180, 245, 0.5)';
-      ctx.fillText(c.zh, p[0], p[1]);
+      ctx.fillText(c.name, p[0], p[1]);
     }
-    // 亮星中文名
+    // 亮星星名
     var magLimit = this.fov > 140 ? 1.3 : this.fov > 90 ? 1.9 : this.fov > 50 ? 2.6 : this.fov > 25 ? 3.4 : 4.5;
     ctx.font = '12px ' + FONT;
     ctx.textAlign = 'left';
@@ -987,7 +994,8 @@
       var x = this.px[idx];
       if (x !== x) continue; // NaN：不可见
       var y = this.py[idx], r = this.pr[idx];
-      var name = this.names.get(idx).zh;
+      var nm = this.names.get(idx);
+      var name = EN ? nm.en : nm.zh;
       var tw = this._textWidth(ctx, 12, name);
       if (!free(x + r + 3, y - 8, tw + 2, 16)) continue;
       ctx.fillStyle = 'rgba(235, 225, 200, 0.78)';

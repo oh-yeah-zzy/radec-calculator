@@ -16,7 +16,13 @@
   'use strict';
 
   var SVGNS = 'http://www.w3.org/2000/svg';
-  var SKY_NAMES = ['白天', '民用晨昏', '航海晨昏', '天文晨昏', '夜间'];
+  // 界面文字按当前语言取（见 js/i18n.js）；单独使用本模块时显示中文原文
+  var I18n = root.RaDec && root.RaDec.I18n;
+  function T(s, params) {
+    if (I18n) return I18n.t(s, params);
+    return params ? s.replace(/\{(\w+)\}/g, function (m, k) { return k in params ? params[k] : m; }) : s;
+  }
+  var SKY_NAMES = ['白天', '民用晨昏', '航海晨昏', '天文晨昏', '夜间'].map(function (s) { return T(s); });
   var SKY_CLASS = ['day', 'civil', 'nautical', 'astro', 'night'];
   var Y_MIN = -30, Y_MAX = 90; // 纵轴范围（度）
   var PAD = { top: 14, right: 12, bottom: 26, left: 38 }; // 绘图区四周留白（含坐标轴标签带）
@@ -47,11 +53,11 @@
     head.className = 'altchart__head';
     var title = document.createElement('div');
     title.className = 'altchart__title';
-    title.textContent = '今夜高度角';
+    title.textContent = T('今夜高度角');
     var toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'chip-btn';
-    toggle.textContent = '表格';
+    toggle.textContent = T('表格');
     toggle.setAttribute('aria-pressed', 'false');
     head.appendChild(title);
     head.appendChild(toggle);
@@ -97,7 +103,7 @@
       tableWrap.hidden = !showTable;
       plotWrap.hidden = showTable;
       legend.hidden = showTable;
-      toggle.textContent = showTable ? '曲线' : '表格';
+      toggle.textContent = showTable ? T('曲线') : T('表格');
       toggle.setAttribute('aria-pressed', showTable ? 'true' : 'false');
       if (showTable) renderTable();
       else draw();
@@ -145,9 +151,9 @@
         return true;
       };
       if (clearOf(0, edge)) {
-        el('text', { x: geom.x0 + 6, y: yOf(0) + 14, class: 'note' }, svg).textContent = '地平线以下';
+        el('text', { x: geom.x0 + 6, y: yOf(0) + 14, class: 'note' }, svg).textContent = T('地平线以下');
       } else if (clearOf(s.length - edge, s.length)) {
-        el('text', { x: geom.x0 + geom.w - 6, y: yOf(0) + 14, class: 'note', 'text-anchor': 'end' }, svg).textContent = '地平线以下';
+        el('text', { x: geom.x0 + geom.w - 6, y: yOf(0) + 14, class: 'note', 'text-anchor': 'end' }, svg).textContent = T('地平线以下');
       }
 
       // 3) 网格线与纵轴刻度（实线细线，保持低调）
@@ -189,7 +195,7 @@
       // 5) 上中天标注（选择性直接标注：只标最高点）
       if (model.transit && model.transit.jd >= model.jdStart && model.transit.jd <= model.jdEnd) {
         var tx = xOf(model.transit.jd), ty = yOf(model.transit.alt);
-        var label = '中天 ' + model.transit.alt.toFixed(1) + '° ' + model.formatTime(model.transit.jd);
+        var label = T('中天 {alt}° {time}', { alt: model.transit.alt.toFixed(1), time: model.formatTime(model.transit.jd) });
         var anchor = tx > geom.x0 + geom.w - 90 ? 'end' : tx < geom.x0 + 90 ? 'start' : 'middle';
         el('text', { x: tx, y: Math.max(geom.y0 + 10, ty - 10), class: 'label', 'text-anchor': anchor }, svg).textContent = label;
       }
@@ -202,7 +208,7 @@
         el('circle', { cx: nx, cy: ny, r: 4.5, class: 'dot' }, svg);
         var nAnchor = nx > geom.x0 + geom.w - 70 ? 'end' : 'start';
         el('text', { x: nx + (nAnchor === 'end' ? -8 : 8), y: ny < geom.y0 + 24 ? ny + 16 : ny - 8, class: 'label', 'text-anchor': nAnchor }, svg)
-          .textContent = '当前 ' + model.nowAlt.toFixed(1) + '°';
+          .textContent = T('当前 {alt}°', { alt: model.nowAlt.toFixed(1) });
       }
 
       // 7) 悬停层：十字准线
@@ -214,7 +220,7 @@
       geom.crossDot = crossDot;
       if (hoverIdx >= 0) showHover(hoverIdx);
 
-      plotWrap.setAttribute('aria-label', model.summary || '高度角曲线');
+      plotWrap.setAttribute('aria-label', model.summary || T('高度角曲线'));
     }
 
     /** 显示第 i 个采样点的十字准线与提示框 */
@@ -236,13 +242,13 @@
       v.textContent = p.alt.toFixed(1) + '°';
       var l1 = document.createElement('div');
       l1.className = 'altchart__tip-row';
-      l1.textContent = model.formatTime(p.jd) + ' · 高度角';
+      l1.textContent = T('{time} · 高度角', { time: model.formatTime(p.jd) });
       var l2 = document.createElement('div');
       l2.className = 'altchart__tip-row';
-      l2.textContent = '方位 ' + model.formatAz(p.az);
+      l2.textContent = T('方位 {az}', { az: model.formatAz(p.az) });
       var l3 = document.createElement('div');
       l3.className = 'altchart__tip-row';
-      l3.textContent = '天空：' + SKY_NAMES[skyState(p.sunAlt)] + '（太阳 ' + p.sunAlt.toFixed(0) + '°）';
+      l3.textContent = T('天空：{sky}（太阳 {sun}°）', { sky: SKY_NAMES[skyState(p.sunAlt)], sun: p.sunAlt.toFixed(0) });
       tip.appendChild(v);
       tip.appendChild(l1);
       tip.appendChild(l2);
@@ -299,7 +305,7 @@
       table.className = 'data-table';
       var thead = document.createElement('thead');
       var hr = document.createElement('tr');
-      ['时间', '高度角', '方位角', '天空'].forEach(function (h) {
+      [T('时间'), T('高度角'), T('方位角'), T('天空')].forEach(function (h) {
         var th = document.createElement('th');
         th.textContent = h;
         hr.appendChild(th);
@@ -341,7 +347,7 @@
        */
       update: function (m) {
         model = m;
-        title.textContent = m.title || '今夜高度角';
+        title.textContent = m.title || T('今夜高度角');
         draw();
         if (!tableWrap.hidden) renderTable();
       }

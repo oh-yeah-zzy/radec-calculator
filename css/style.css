@@ -69,6 +69,10 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
+/* 英文界面：静态文字翻译完成前先隐藏页面，避免闪现中文（见 js/i18n.js） */
+html.i18n-pending body {
+  visibility: hidden;
+}
 a {
   color: var(--cyan);
   text-decoration: none;
@@ -427,6 +431,10 @@ body.panels-hidden .layout {
   font-size: 13px;
   color: var(--muted);
 }
+/* 英文标签（Time zone、Convert to 等）比中文长，加宽以免折行 */
+html[lang="en"] .form-row__label {
+  width: 5em;
+}
 .form-row select,
 .inline select {
   flex: 1;
@@ -651,6 +659,14 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 .icon-btn[aria-expanded="true"] {
   color: var(--accent);
   border-color: var(--accent);
+}
+/* 文字按钮（语言切换） */
+.icon-btn--text {
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 .icon-btn svg {
   width: 18px;
@@ -917,6 +933,10 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   grid-template-columns: minmax(6.5em, auto) 1fr auto;
   align-items: center;
   column-gap: 12px;
+}
+/* 英文标签较长（如 Greenwich apparent sidereal time）：限制标签列宽度，让标签折行而不是挤压数值 */
+html[lang="en"] .kv {
+  grid-template-columns: minmax(6.5em, 10.5em) 1fr auto;
 }
 .kv__k {
   font-size: 12.5px;
@@ -1454,6 +1474,10 @@ html.night .night-filter {
   .brand__title {
     font-size: 19px;
   }
+  /* 英文标题 "RA/Dec Calculator" 比中文长，收紧字距以免压到右侧的恒星时 */
+  html[lang="en"] .brand__title {
+    letter-spacing: 0.03em;
+  }
   .brand__sub {
     display: none;
   }
@@ -1529,6 +1553,10 @@ html.night .night-filter {
   }
   .clock__v {
     font-size: 13px;
+  }
+  html[lang="en"] .brand__title {
+    font-size: 16px;
+    letter-spacing: 0.01em;
   }
 }
 

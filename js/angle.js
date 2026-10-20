@@ -21,8 +21,21 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  /** 解析失败时抛出的错误，message 是直接展示给用户的中文提示 */
-  class ParseError extends Error {}
+  /**
+   * 解析失败时抛出的错误。message 是直接展示给用户的中文提示；
+   * key（带 {占位符} 的中文模板）与 params 供界面按当前语言重新生成提示（见 js/i18n.js）。
+   */
+  class ParseError extends Error {
+    constructor(key, params) {
+      super(fillTemplate(key, params));
+      this.key = key;
+      this.params = params || null;
+    }
+  }
+  function fillTemplate(s, params) {
+    if (!params) return s;
+    return s.replace(/\{(\w+)\}/g, function (m, k) { return k in params ? params[k] : m; });
+  }
 
   /* ------------------------------------------------------------------
    * 一、文本预处理：把五花八门的符号统一成少数几个 ASCII 记号
@@ -124,7 +137,7 @@
       if (!m) {
         var bad = s[i];
         if (bad === '+' || bad === '-') throw new ParseError('正负号只能写在最前面');
-        throw new ParseError('无法识别的字符「' + bad + '」');
+        throw new ParseError('无法识别的字符「{c}」', { c: bad });
       }
       var numStr = m[1];
       i += numStr.length;
@@ -228,9 +241,9 @@
   function parseLatitudeLike(text, label) {
     var tok = tokenize(text);
     var r = combine(tok, 'd', 'd');
-    if (r.base === 'h') throw new ParseError(label + '不能用"时"作单位');
+    if (r.base === 'h') throw new ParseError('{label}不能用"时"作单位', { label: label });
     var deg = tok.sign * r.value;
-    if (Math.abs(deg) > 90) throw new ParseError(label + '必须在 −90° ~ +90° 之间');
+    if (Math.abs(deg) > 90) throw new ParseError('{label}必须在 −90° ~ +90° 之间', { label: label });
     return { deg: deg, desc: describe(r) };
   }
 
@@ -246,7 +259,7 @@
     var tok = tokenize(text);
     var r = combine(tok, 'd', 'd');
     var deg = r.base === 'h' ? r.value * 15 : r.value;
-    if (deg > 360) throw new ParseError(label + '必须在 0° ~ 360° 之间');
+    if (deg > 360) throw new ParseError('{label}必须在 0° ~ 360° 之间', { label: label });
     deg = tok.sign * deg;
     deg = ((deg % 360) + 360) % 360;
     return { deg: deg, desc: describe(r) };

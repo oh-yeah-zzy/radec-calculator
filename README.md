@@ -3,6 +3,11 @@
 一个纯静态的赤经赤纬（RA / Dec）计算网站，以真实星表实时绘制的星图为背景。
 无需安装、无需构建：**双击 `index.html` 即可使用**，也可以直接部署到 GitHub Pages 等静态托管服务。
 
+> **English:** A static, no-build RA/Dec calculator over a live star map: format and coordinate-system conversion,
+> precession and apparent places (J2000, B1950, JNow or any date), altitude/azimuth with rise/set times,
+> and angular separation. The interface is available in English and Chinese — it follows your browser language,
+> and the button at the top right switches it (or open `index.html?lang=en`).
+
 ## 功能
 
 | 功能 | 说明 |
@@ -14,8 +19,9 @@
 | 地平坐标反算 | 在输入区选择"地平"，输入方位角（北起向东）和高度角，按观测时间与地点反算出 J2000 赤经赤纬、观测时刻的视赤经赤纬（JNow）和时角；勾选大气折射时，高度角按含折射的观测值处理。实时模式下结果每秒更新 |
 | 角距离 | 两个天体（可混用不同坐标系与历元）之间的角距离、位置角，小角度时给出切平面偏移 ξ、η |
 | 天体搜索 | 本地内置 88 个常用天体（SIMBAD 精确坐标）和约 3000 颗有名称的恒星，支持中文名、英文名、拜耳名（如 `α Ori`、`猎户座α`）、HIP 编号；找不到时可在线查询 SIMBAD（需联网） |
-| 星图 | 约 5000 颗 ≤6 等亮星（按 B−V 色指数着色）、银河、星座连线与中文名、赤经赤纬网格、天赤道与黄道、观测地地平线；可拖动、平滑缩放，点击拾取坐标；目标与角距离会实时标注在图上 |
-| 其他 | 红光夜视模式、全屏星图、桌面/手机自适应布局、地址栏分享目标（`#ra=…&dec=…`）、自动记住观测地点等设置 |
+| 星图 | 约 5000 颗 ≤6 等亮星（按 B−V 色指数着色）、银河、星座连线与星座名、赤经赤纬网格、天赤道与黄道、观测地地平线；可拖动、平滑缩放，点击拾取坐标；目标与角距离会实时标注在图上 |
+| 界面语言 | 简体中文 / English：首次打开按浏览器语言自动选择，右上角按钮切换并记住选择；地址栏加 `?lang=en` 或 `?lang=zh` 可直接指定。英文界面中星名用英文名、星座名用拉丁名，搜索仍支持中文名 |
+| 其他 | 红光夜视模式、全屏星图、桌面/手机自适应布局、地址栏分享目标（`#ra=…&dec=…`）、自动记住观测地点等设置；预设地点包括中国、美国的主要城市与天文台，首次打开按本机时区选择默认地点 |
 
 ## 使用
 
@@ -54,6 +60,7 @@ js/astro.js             天文算法（纯函数，可在 Node.js 中测试）
 js/starmap.js           背景星图（Canvas，球极投影）
 js/altchart.js          高度角曲线图（SVG）
 js/app.js               页面交互逻辑
+js/i18n.js              界面语言（中文 / English）：语言选择与英文对照表
 data/stars.js           亮星星表与星名（≤6 等，5044 颗）
 data/constellations.js  星座连线、中文名、IAU 星座边界
 data/milkyway.js        银河亮度图（由轮廓数据栅格化）
